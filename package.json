@@ -1,0 +1,108 @@
+{
+  "name": "ui-template",
+  "version": "1.0.0",
+  "description": "An UI for <project>",
+  "main": "./out/main/index.js",
+  "author": "Online Systems",
+  "homepage": "www.onlinesystems.au",
+  "license": "Proprietary",
+  "build": {
+    "appId": "com.onlinesystems.rbrui",
+    "productName": "RBR Data Processor",
+    "directories": {
+      "output": "dist"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
+      ]
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin"
+    ]
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "postinstall": "electron-builder install-app-deps",
+    "build:unpack": "npm run build && electron-builder --dir",
+    "build:win": "npm run build && electron-builder --win --x64 --ia32",
+    "build:win32": "npm run build && electron-builder --win --ia32",
+    "build:win64": "npm run build && electron-builder --win --x64",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "release-major": "npx standard-version --release-as major && git push --follow-tags origin main",
+    "release-minor": "npx standard-version --release-as minor && git push --follow-tags origin main",
+    "release-patch": "npx standard-version --release-as patch && git push --follow-tags origin main",
+    "commit": "npx cz"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "child_process": "^1.0.2",
+    "clsx": "^2.1.1",
+    "sonner": "^2.0.3",
+    "yarn": "^1.22.22"
+  },
+  "devDependencies": {
+    "@ant-design/icons": "^5.5.1",
+    "@electron-toolkit/eslint-config-prettier": "^2.0.0",
+    "@electron-toolkit/eslint-config-ts": "^2.0.0",
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@heroicons/react": "^2.1.5",
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "antd": "^5.21.4",
+    "autoprefixer": "^10.4.20",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.3",
+    "framer-motion": "^11.11.9",
+    "lucide-react": "^0.453.0",
+    "postcss": "^8.4.47",
+    "prettier": "^3.3.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.3.0",
+    "react-router-dom": "^6.27.0",
+    "tailwind-merge": "^2.5.4",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3",
+    "vite": "^5.3.1"
+  }
+}

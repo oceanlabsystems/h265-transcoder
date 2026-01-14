@@ -1,0 +1,17 @@
+# Changelog
+
+All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
+
+## 1.0.0 (2025-03-19)
+
+
+### Features
+
+* **template:** comply with github commit and branch procedure ([a5c6f05](https://github.com/onlinesystemsau/UI-Template/commit/a5c6f056f239988e314c6f748bfe753e9c1d0f72))
+
+
+### Bug Fixes
+
+* linting and camera status update for downloading state ([a775c92](https://github.com/onlinesystemsau/UI-Template/commit/a775c92c1eff401abd958eb478e2dca3e065db9d))
+* template ([6e1299c](https://github.com/onlinesystemsau/UI-Template/commit/6e1299c1a4792023c3a7112efd21a0c03a03d3ba))
+* **template:** fix icon loading and default icon ([979c1e0](https://github.com/onlinesystemsau/UI-Template/commit/979c1e0ed98bb983dad9504db0d8a30fe8674a6e))

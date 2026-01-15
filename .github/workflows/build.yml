@@ -36,81 +36,78 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+          # Note: npm cache disabled due to platform-specific rollup binaries issue
+          # cache: "npm"
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Remove node_modules and package-lock to fix rollup platform-specific binaries
+          # See: https://github.com/npm/cli/issues/4828
+          rm -rf node_modules || true
+          rm -f package-lock.json || true
+          npm install
+        env:
+          npm_config_optional: true
 
-      - name: Download GStreamer for Windows
+      - name: Install GStreamer for Windows
         if: matrix.platform == 'win'
         shell: pwsh
         run: |
-          # Download GStreamer MSI using PowerShell with browser-like headers
-          $url = "https://gstreamer.freedesktop.org/data/pkg/windows/1.22.10/msvc/gstreamer-1.0-msvc-x86_64-1.22.10.msi"
-          $msiPath = "gstreamer/gstreamer-1.0-msvc-x86_64-1.22.10.msi"
           $extractDir = "gstreamer/x64"
 
-          # Create directories
-          New-Item -ItemType Directory -Force -Path "gstreamer" | Out-Null
-
-          # Check if already extracted
+          # Check if already set up
           if (Test-Path "$extractDir/bin/gst-launch-1.0.exe") {
-            Write-Host "GStreamer already extracted"
+            Write-Host "GStreamer already set up"
             exit 0
           }
 
-          # Try to download with curl (usually more reliable in CI)
-          Write-Host "Downloading GStreamer MSI..."
-          try {
-            curl.exe -L -o $msiPath `
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" `
-              -H "Accept: */*" `
-              --retry 3 `
-              --retry-delay 5 `
-              $url
-            
-            if (!(Test-Path $msiPath) -or (Get-Item $msiPath).Length -lt 1000000) {
-              throw "Download failed or file too small"
-            }
-          } catch {
-            Write-Host "curl failed, trying Invoke-WebRequest..."
-            $headers = @{
-              "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            Invoke-WebRequest -Uri $url -OutFile $msiPath -Headers $headers -MaximumRetryCount 3
-          }
+          # Install GStreamer using Chocolatey (pre-installed on GitHub runners)
+          Write-Host "Installing GStreamer via Chocolatey..."
+          choco install gstreamer gstreamer-devel -y --no-progress
 
-          # Extract MSI using msiexec
-          Write-Host "Extracting GStreamer MSI..."
-          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-
-          # Use administrative install to extract (works without admin rights)
-          Start-Process msiexec.exe -ArgumentList "/a", "`"$msiPath`"", "/qn", "TARGETDIR=`"$((Get-Location).Path)\$extractDir`"" -Wait -NoNewWindow
-
-          # Look for extracted files in various locations
-          $possiblePaths = @(
-            "$extractDir/bin/gst-launch-1.0.exe",
-            "$extractDir/1.0/msvc_x86_64/bin/gst-launch-1.0.exe",
-            "$extractDir/MSVC-x86_64-1.0/bin/gst-launch-1.0.exe"
+          # Find where Chocolatey installed GStreamer
+          $gstRoot = $null
+          $possibleRoots = @(
+            "C:\gstreamer\1.0\msvc_x86_64",
+            "C:\gstreamer\1.0\mingw_x86_64",
+            "$env:ChocolateyInstall\lib\gstreamer\tools",
+            "$env:ProgramFiles\gstreamer\1.0\msvc_x86_64",
+            "$env:ProgramFiles\gstreamer\1.0\mingw_x86_64"
           )
 
-          foreach ($path in $possiblePaths) {
-            if (Test-Path $path) {
-              $sourceDir = Split-Path (Split-Path $path)
-              if ($sourceDir -ne $extractDir) {
-                Write-Host "Moving files from $sourceDir to $extractDir"
-                Copy-Item -Path "$sourceDir/*" -Destination $extractDir -Recurse -Force
-              }
+          foreach ($root in $possibleRoots) {
+            if (Test-Path "$root/bin/gst-launch-1.0.exe") {
+              $gstRoot = $root
+              Write-Host "Found GStreamer at: $gstRoot"
               break
             }
           }
 
-          # Verify extraction
+          if (-not $gstRoot) {
+            # Try to find it anywhere
+            $gstExe = Get-ChildItem -Path "C:\" -Recurse -Filter "gst-launch-1.0.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gstExe) {
+              $gstRoot = Split-Path (Split-Path $gstExe.FullName)
+              Write-Host "Found GStreamer at: $gstRoot"
+            }
+          }
+
+          if (-not $gstRoot) {
+            Write-Error "GStreamer installation not found!"
+            exit 1
+          }
+
+          # Copy GStreamer to project directory for bundling
+          Write-Host "Copying GStreamer to $extractDir..."
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Copy-Item -Path "$gstRoot\*" -Destination $extractDir -Recurse -Force
+
+          # Verify
           if (Test-Path "$extractDir/bin/gst-launch-1.0.exe") {
-            Write-Host "GStreamer extracted successfully"
+            Write-Host "GStreamer setup successful"
+            Get-ChildItem "$extractDir/bin" | Select-Object -First 10
           } else {
-            Write-Error "GStreamer extraction failed!"
-            Get-ChildItem -Recurse $extractDir | Select-Object FullName
+            Write-Error "GStreamer setup failed!"
             exit 1
           }
         continue-on-error: false

@@ -3,7 +3,10 @@
   "version": "1.0.1",
   "description": "An application to batch process videofiles into time based chunks and output to H.265",
   "main": "./out/main/index.js",
-  "author": "Oceanlab Systems",
+  "author": {
+    "name": "Oceanlab Systems",
+    "email": "support@oceanlabsystems.com"
+  },
   "homepage": "www.oceanlabsystems.com",
   "license": "Proprietary",
   "build": {

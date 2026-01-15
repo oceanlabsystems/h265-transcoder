@@ -197,15 +197,19 @@ jobs:
         shell: cmd
         run: |
           npm run build
-          npm run build:win64
+          npx electron-builder --win --x64 --publish never
 
       - name: Build application (macOS)
         if: matrix.platform == 'mac'
-        run: npm run build:mac
+        run: |
+          npm run build
+          npx electron-builder --mac --publish never
 
       - name: Build application (Linux)
         if: matrix.platform == 'linux'
-        run: npm run build:linux
+        run: |
+          npm run build
+          npx electron-builder --linux --publish never
 
       - name: Upload Windows artifacts
         if: matrix.platform == 'win'

@@ -1,0 +1,166 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
+
+jobs:
+  build:
+    name: Build for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: macos-latest
+            platform: mac
+            arch: universal
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download GStreamer for Windows
+        if: matrix.platform == 'win'
+        run: npm run download-gstreamer
+        continue-on-error: false
+
+      - name: Download GStreamer for macOS
+        if: matrix.platform == 'mac'
+        run: npm run download-gstreamer -- --platform darwin
+        continue-on-error: false
+
+      - name: Install GStreamer for Linux
+        if: matrix.platform == 'linux'
+        run: |
+          echo "Installing GStreamer development packages..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            gstreamer1.0-tools \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libx265-dev
+        continue-on-error: false
+
+      - name: Build application (Windows)
+        if: matrix.platform == 'win'
+        shell: cmd
+        run: |
+          npm run build
+          npm run build:win64
+
+      - name: Build application (macOS)
+        if: matrix.platform == 'mac'
+        run: npm run build:mac
+
+      - name: Build application (Linux)
+        if: matrix.platform == 'linux'
+        run: npm run build:linux
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/**/*.exe
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload macOS artifacts
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: dist/**/*.dmg
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: |
+            dist/**/*.AppImage
+            dist/**/*.deb
+          retention-days: 90
+          if-no-files-found: warn
+
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          body: |
+            ## Sub Video Processor ${{ steps.get_version.outputs.version }}
+            
+            ### Downloads
+            
+            **Windows:**
+            - Installer: Download from artifacts below
+            
+            **macOS:**
+            - DMG: Download from artifacts below
+            
+            **Linux:**
+            - AppImage: Download from artifacts below
+            - DEB package: Download from artifacts below
+            
+            ### Changes
+            See [CHANGELOG.md](CHANGELOG.md) for details.
+          files: |
+            artifacts/windows-installer/**
+            artifacts/macos-installer/**
+            artifacts/linux-installer/**
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,14 @@
 {
-  "name": "ui-template",
+  "name": "sub-video-processor",
   "version": "1.0.0",
-  "description": "An UI for <project>",
+  "description": "An application to batch process .MOV files into 30min chunks and output to H.265",
   "main": "./out/main/index.js",
   "author": "Online Systems",
   "homepage": "www.onlinesystems.au",
   "license": "Proprietary",
   "build": {
-    "appId": "com.onlinesystems.rbrui",
-    "productName": "RBR Data Processor",
+    "appId": "com.oceanlabsystems.sub-video-processor",
+    "productName": "Sub Video Processor",
     "directories": {
       "output": "dist"
     },
@@ -30,13 +30,57 @@
         }
       ]
     },
+    "mac": {
+      "icon": "resources/icon.png",
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "resources/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility"
+    },
     "files": [
       "out/**/*",
       "resources/**/*",
+      "gstreamer/**/*",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
       "!**/node_modules/*.d.ts",
-      "!**/node_modules/.bin"
+      "!**/node_modules/.bin",
+      "!gstreamer/**/*.msi"
+    ],
+    "extraResources": [
+      {
+        "from": "gstreamer",
+        "to": "gstreamer",
+        "filter": [
+          "**/*",
+          "!**/*.msi",
+          "!**/*.pkg"
+        ]
+      }
     ]
   },
   "scripts": {
@@ -49,12 +93,17 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
+    "download-gstreamer": "node scripts/download-gstreamer.js",
+    "prebuild": "npm run download-gstreamer",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win --x64 --ia32",
     "build:win32": "npm run build && electron-builder --win --ia32",
     "build:win64": "npm run build && electron-builder --win --x64",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "prebuild:mac": "node scripts/download-gstreamer.js --platform darwin",
+    "build:mac": "npm run prebuild:mac && electron-vite build && electron-builder --mac",
+    "prebuild:linux": "echo 'GStreamer will be installed via system packages in CI'",
+    "build:linux": "npm run prebuild:linux && electron-vite build && electron-builder --linux",
+    "generate-icons": "node scripts/generate-icons.js",
     "release-major": "npx standard-version --release-as major && git push --follow-tags origin main",
     "release-minor": "npx standard-version --release-as minor && git push --follow-tags origin main",
     "release-patch": "npx standard-version --release-as patch && git push --follow-tags origin main",
@@ -100,8 +149,10 @@
     "react-dom": "^18.3.1",
     "react-icons": "^5.3.0",
     "react-router-dom": "^6.27.0",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^2.5.4",
     "tailwindcss": "^3.4.13",
+    "to-ico": "^1.1.5",
     "typescript": "^5.6.3",
     "vite": "^5.3.1"
   }

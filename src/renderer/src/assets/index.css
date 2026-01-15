@@ -1,24 +1,371 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --color-primary: #06b6d4;
+    --color-primary-dark: #0891b2;
+    --color-accent: #f97316;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-surface: #0a0a0f;
+    --color-surface-elevated: #12121a;
+    --color-surface-card: #1a1a24;
+    --color-border: rgba(6, 182, 212, 0.2);
+    --color-border-bright: rgba(6, 182, 212, 0.4);
+    --color-text: #f1f5f9;
+    --color-text-muted: #94a3b8;
+    --glow-primary: 0 0 20px rgba(6, 182, 212, 0.3),
+      0 0 40px rgba(6, 182, 212, 0.1);
+    --glow-success: 0 0 15px rgba(16, 185, 129, 0.4);
+  }
+
   #root {
     @apply h-full;
   }
 
-  /* Correctly target both html and body */
   html,
   body {
-    @apply h-full; /* Full height for html and body */
-    @apply select-none; /* Disable text selection */
-    @apply bg-transparent; /* Transparent background */
-    @apply font-mono antialiased text-white; /* Tailwind styles for fonts */
-    @apply overflow-hidden; /* Hide overflow */
+    @apply h-full select-none overflow-hidden;
+    background: var(--color-surface);
+    font-family:
+      "Outfit",
+      -apple-system,
+      BlinkMacSystemFont,
+      sans-serif;
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Hide scrollbars for webkit browsers (like Electron) */
   ::-webkit-scrollbar {
-    display: none;
+    width: 6px;
+    height: 6px;
   }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-bright);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-primary);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: linear-gradient(
+      135deg,
+      rgba(26, 26, 36, 0.9) 0%,
+      rgba(18, 18, 26, 0.95) 100%
+    );
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+
+  @media (min-width: 640px) {
+    .glass-panel {
+      border-radius: 12px;
+    }
+  }
+
+  .glass-panel-elevated {
+    background: linear-gradient(
+      145deg,
+      rgba(26, 26, 36, 0.95) 0%,
+      rgba(18, 18, 26, 0.98) 100%
+    );
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--color-border-bright);
+    border-radius: 10px;
+    box-shadow: var(--glow-primary);
+  }
+
+  @media (min-width: 640px) {
+    .glass-panel-elevated {
+      border-radius: 16px;
+    }
+  }
+
+  .input-field {
+    @apply w-full px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-all duration-200;
+    background: rgba(10, 10, 15, 0.6);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+  }
+
+  @media (min-width: 640px) {
+    .input-field {
+      font-size: 13px;
+    }
+  }
+
+  .input-field:hover {
+    border-color: var(--color-border-bright);
+  }
+
+  .input-field:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1);
+  }
+
+  .btn-primary {
+    @apply px-4 sm:px-6 py-2.5 sm:py-3 font-semibold rounded-lg transition-all duration-200;
+    background: linear-gradient(
+      135deg,
+      var(--color-primary) 0%,
+      var(--color-primary-dark) 100%
+    );
+    color: #0a0a0f;
+    border: none;
+    font-family: "Outfit", sans-serif;
+    letter-spacing: 0.025em;
+    font-size: 13px;
+  }
+
+  @media (min-width: 640px) {
+    .btn-primary {
+      font-size: 14px;
+    }
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: var(--glow-primary);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-2 sm:px-4 py-2 sm:py-2.5 font-medium rounded-lg transition-all duration-200;
+    background: var(--color-surface-card);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    font-size: 12px;
+  }
+
+  @media (min-width: 640px) {
+    .btn-secondary {
+      font-size: 14px;
+    }
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--color-primary);
+    background: rgba(6, 182, 212, 0.1);
+  }
+
+  .label-text {
+    @apply block mb-1.5 sm:mb-2 text-xs sm:text-sm font-medium;
+    color: var(--color-text-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .progress-bar-container {
+    @apply w-full h-2 rounded-full overflow-hidden;
+    background: rgba(10, 10, 15, 0.8);
+  }
+
+  .progress-bar-fill {
+    @apply h-full rounded-full transition-all duration-300 ease-out;
+  }
+
+  .progress-bar-fill.cyan {
+    background: linear-gradient(
+      90deg,
+      var(--color-primary-dark) 0%,
+      var(--color-primary) 100%
+    );
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+  }
+
+  .progress-bar-fill.green {
+    background: linear-gradient(90deg, #059669 0%, var(--color-success) 100%);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  }
+
+  .progress-bar-fill.orange {
+    background: linear-gradient(90deg, #d97706 0%, var(--color-warning) 100%);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+  }
+
+  .stat-value {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+
+  .stat-label {
+    color: var(--color-text-muted);
+    font-size: 12px;
+  }
+
+  .file-badge {
+    @apply inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 rounded-full font-medium;
+    font-size: 10px;
+    background: rgba(6, 182, 212, 0.15);
+    color: var(--color-primary);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+  }
+
+  @media (min-width: 640px) {
+    .file-badge {
+      font-size: 12px;
+    }
+  }
+
+  .processing-indicator {
+    @apply inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg;
+    font-size: 11px;
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--color-success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @media (min-width: 640px) {
+    .processing-indicator {
+      font-size: 14px;
+    }
+  }
+
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 5px rgba(16, 185, 129, 0.2);
+    }
+    50% {
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+    }
+  }
+
+  .animate-spin-slow {
+    animation: spin 3s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Draggable region for frameless window */
+  .window-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  /* Non-draggable elements (buttons, inputs, etc.) */
+  .window-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Window control buttons */
+  .window-control-btn {
+    @apply w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded transition-all duration-200;
+    -webkit-app-region: no-drag;
+  }
+
+  .window-control-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .window-control-btn.close:hover {
+    background: rgba(239, 68, 68, 0.2);
+  }
+}
+
+/* Ant Design overrides for dark theme consistency */
+.ant-select-selector {
+  background: rgba(10, 10, 15, 0.6) !important;
+  border-color: var(--color-border) !important;
+  font-family: "JetBrains Mono", monospace !important;
+  font-size: 12px !important;
+  min-height: 36px !important;
+}
+
+@media (min-width: 640px) {
+  .ant-select-selector {
+    font-size: 13px !important;
+    min-height: 40px !important;
+  }
+}
+
+.ant-select:hover .ant-select-selector {
+  border-color: var(--color-border-bright) !important;
+}
+
+.ant-select-focused .ant-select-selector {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1) !important;
+}
+
+.ant-select-dropdown {
+  background: var(--color-surface-card) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+}
+
+.ant-select-item {
+  font-family: "JetBrains Mono", monospace !important;
+  font-size: 13px !important;
+}
+
+.ant-select-item-option-selected {
+  background: rgba(6, 182, 212, 0.2) !important;
+}
+
+.ant-select-item-option-active {
+  background: rgba(6, 182, 212, 0.1) !important;
+}
+
+.ant-input {
+  background: rgba(10, 10, 15, 0.6) !important;
+  border-color: var(--color-border) !important;
+  font-family: "JetBrains Mono", monospace !important;
+  font-size: 13px !important;
+}
+
+.ant-input:hover {
+  border-color: var(--color-border-bright) !important;
+}
+
+.ant-input:focus {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1) !important;
+}
+
+.ant-input-number {
+  background: rgba(10, 10, 15, 0.6) !important;
+  border-color: var(--color-border) !important;
+}
+
+.ant-input-number-input {
+  font-family: "JetBrains Mono", monospace !important;
+}
+
+.ant-btn {
+  font-family: "Outfit", sans-serif !important;
+  font-weight: 500 !important;
 }

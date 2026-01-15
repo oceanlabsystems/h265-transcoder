@@ -10,6 +10,14 @@ const api = {
         "app:get-auto-launch-state",
         "app:set-auto-launch",
         "open:external-url",
+        "video:select-input-directory",
+        "video:select-output-directory",
+        "video:scan-directory",
+        "video:start-batch-process",
+        "window:close",
+        "window:minimize",
+        "window:maximize",
+        "window:is-maximized",
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);
@@ -20,6 +28,7 @@ const api = {
       const validChannels = [
         // Add your valid event channels here
         "app:status-changed",
+        "video:progress-update",
       ];
       if (validChannels.includes(channel)) {
         // Strip event as it includes `sender` and is a security risk

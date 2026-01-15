@@ -689,7 +689,15 @@ function VideoProcessor() {
           }}
         >
           <span className="hidden sm:inline">
-            H.265/HEVC Batch Transcoder • GStreamer Pipeline
+            H.265/HEVC Batch Transcoder • GStreamer Pipeline •{" "}
+            <a
+              href="https://www.oceanlabsystems.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "inherit", textDecoration: "underline" }}
+            >
+              Powered by Oceanlab Systems
+            </a>
           </span>
           <span className="sm:hidden">H.265 Transcoder • GStreamer</span>
         </footer>

@@ -295,7 +295,7 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.tag }}
           name: Release ${{ steps.get_version.outputs.version }}
           body: |
-            ## Sub Video Processor ${{ steps.get_version.outputs.version }}
+            ## H265 Transcoder ${{ steps.get_version.outputs.version }}
 
             ### Downloads
 

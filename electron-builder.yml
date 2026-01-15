@@ -72,6 +72,8 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates
+# Uncomment and configure when auto-updates are set up
+# publish:
+#   provider: github
+#   owner: oceanlabsystems
+#   repo: h265-transcoder

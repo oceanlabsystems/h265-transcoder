@@ -66,8 +66,8 @@ A professional desktop application for batch processing video files into H.265 e
 1. **Clone the repository**:
 
    ```bash
-   git clone <repository-url>
-   cd sub-video-processor
+   git clone https://github.com/oceanlabsystems/h265-transcoder.git
+   cd h265-transcoder
    ```
 
 2. **Install dependencies**:
@@ -435,6 +435,7 @@ For issues, questions, or contributions, please refer to the project repository 
 
 ---
 
-**Version**: 1.0.0  
+**Version**: 1.1.2  
 **Author**: Oceanlab Systems  
-**Homepage**: <https://www.oceanlabsystems.com>
+**Homepage**: <https://www.oceanlabsystems.com>  
+**License**: [MIT](LICENSE)

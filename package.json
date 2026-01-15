@@ -7,7 +7,24 @@
     "name": "Oceanlab Systems",
     "email": "support@oceanlabsystems.com"
   },
-  "homepage": "www.oceanlabsystems.com",
+  "homepage": "https://www.oceanlabsystems.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oceanlabsystems/h265-transcoder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oceanlabsystems/h265-transcoder/issues"
+  },
+  "keywords": [
+    "h265",
+    "hevc",
+    "video",
+    "transcoder",
+    "encoder",
+    "gstreamer",
+    "electron",
+    "batch-processing"
+  ],
   "license": "MIT",
   "build": {
     "appId": "com.oceanlabsystems.h265-transcoder",

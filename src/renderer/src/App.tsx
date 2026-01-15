@@ -391,7 +391,7 @@ function VideoProcessor() {
                         type="text"
                         value={inputDir}
                         readOnly
-                        placeholder="Select folder with .MOV files..."
+                        placeholder="Select folder with video input files..."
                         className="input-field flex-1 min-w-0 text-xs sm:text-sm py-2 sm:py-2.5"
                       />
                       <button
@@ -405,7 +405,7 @@ function VideoProcessor() {
                     {files.length > 0 && (
                       <div className="mt-2">
                         <span className="file-badge text-[10px] sm:text-xs">
-                          {files.length} .MOV file
+                          {files.length} video file
                           {files.length !== 1 ? "s" : ""} found
                         </span>
                       </div>

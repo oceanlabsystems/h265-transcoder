@@ -421,7 +421,7 @@ This automatically:
 
 ## License
 
-Proprietary - © Online Systems
+MIT
 
 ## Support
 

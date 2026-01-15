@@ -8,7 +8,7 @@
     "email": "support@oceanlabsystems.com"
   },
   "homepage": "www.oceanlabsystems.com",
-  "license": "Proprietary",
+  "license": "MIT",
   "build": {
     "appId": "com.oceanlabsystems.h265-transcoder",
     "productName": "H265 Transcoder",

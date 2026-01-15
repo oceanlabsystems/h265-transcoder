@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.0.1](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.0.0...v1.0.1) (2026-01-15)
+
+
+### Bug Fixes
+
+* remove node_modules before install to fix rollup platform binaries ([7232d94](https://github.com/oceanlabsystems/h265-transcoder/commit/7232d945a3ed60e0484ae8cb6d2a20f43fd0e2b8))
+
 ## 1.0.0 (2026-01-15)
 
 

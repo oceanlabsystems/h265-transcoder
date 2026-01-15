@@ -98,15 +98,39 @@ jobs:
             exit 1
           }
 
-          # Copy GStreamer to project directory for bundling
-          Write-Host "Copying GStreamer to $extractDir..."
-          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-          Copy-Item -Path "$gstRoot\*" -Destination $extractDir -Recurse -Force
+          # Copy only essential GStreamer runtime files (not dev files)
+          Write-Host "Copying essential GStreamer files to $extractDir..."
+          New-Item -ItemType Directory -Force -Path "$extractDir/bin" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$extractDir/lib/gstreamer-1.0" | Out-Null
 
-          # Verify
+          # Copy only DLLs from bin (runtime libraries)
+          Write-Host "Copying DLLs..."
+          Copy-Item -Path "$gstRoot/bin/*.dll" -Destination "$extractDir/bin/" -Force
+
+          # Copy only essential executables
+          Write-Host "Copying essential executables..."
+          $essentialExes = @("gst-launch-1.0.exe", "gst-inspect-1.0.exe", "gst-typefind-1.0.exe")
+          foreach ($exe in $essentialExes) {
+            if (Test-Path "$gstRoot/bin/$exe") {
+              Copy-Item -Path "$gstRoot/bin/$exe" -Destination "$extractDir/bin/" -Force
+            }
+          }
+
+          # Copy plugin DLLs
+          Write-Host "Copying plugins..."
+          Copy-Item -Path "$gstRoot/lib/gstreamer-1.0/*.dll" -Destination "$extractDir/lib/gstreamer-1.0/" -Force
+
+          # Copy libexec if it exists (plugin scanner)
+          if (Test-Path "$gstRoot/libexec") {
+            New-Item -ItemType Directory -Force -Path "$extractDir/libexec" | Out-Null
+            Copy-Item -Path "$gstRoot/libexec/*" -Destination "$extractDir/libexec/" -Recurse -Force
+          }
+
+          # Verify and show size
           if (Test-Path "$extractDir/bin/gst-launch-1.0.exe") {
             Write-Host "GStreamer setup successful"
-            Get-ChildItem "$extractDir/bin" | Select-Object -First 10
+            $size = (Get-ChildItem -Path $extractDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+            Write-Host "GStreamer bundle size: $([math]::Round($size, 2)) MB"
           } else {
             Write-Error "GStreamer setup failed!"
             exit 1

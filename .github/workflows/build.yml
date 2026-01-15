@@ -219,9 +219,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: |
-            dist/*.exe
-            dist/**/*.exe
+          path: dist/*Setup*.exe
           retention-days: 90
           if-no-files-found: error
 
@@ -290,9 +288,10 @@ jobs:
             ### Changes
             See [CHANGELOG.md](CHANGELOG.md) for details.
           files: |
-            artifacts/windows-installer/**
-            artifacts/macos-installer/**
-            artifacts/linux-installer/**
+            artifacts/windows-installer/*Setup*.exe
+            artifacts/macos-installer/*.dmg
+            artifacts/linux-installer/*.AppImage
+            artifacts/linux-installer/*.deb
           draft: false
           prerelease: false
         env:

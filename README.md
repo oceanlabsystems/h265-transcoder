@@ -1,10 +1,10 @@
-# Sub Video Processor
+# H265 Transcoder
 
 A professional desktop application for batch processing video files into H.265 encoded chunks. Built with Electron, React, and GStreamer, this tool efficiently splits large video files (especially .MOV files) into configurable time-based segments and transcodes them to H.265 format.
 
 ## Overview
 
-**Sub Video Processor** is designed for processing large video files, particularly those from underwater cameras or other recording devices. It automatically:
+**H265 Transcoder** is designed for processing large video files, particularly those from underwater cameras or other recording devices. It automatically:
 
 - Scans directories for video files
 - Splits videos into configurable time-based chunks (default: 30 minutes)

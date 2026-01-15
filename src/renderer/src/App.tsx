@@ -312,7 +312,7 @@ function VideoProcessor() {
                   className="text-sm sm:text-base md:text-lg font-semibold truncate"
                   style={{ fontFamily: "'Outfit', sans-serif" }}
                 >
-                  Video Batch Processor
+                  H265 Transcoder
                 </h1>
                 <p
                   className="text-[10px] sm:text-xs truncate hidden sm:block"

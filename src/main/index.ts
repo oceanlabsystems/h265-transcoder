@@ -28,14 +28,21 @@ function getIconPath(filename: string): string {
 
 function createWindow(): BrowserWindow {
   // Create the browser window.
+  // Use platform-appropriate icons
+  const windowIcon =
+    process.platform === "win32"
+      ? getIconPath("icon.ico")
+      : process.platform === "darwin"
+        ? getIconPath("icon.png")
+        : icon; // Linux uses the imported PNG asset
+
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 750,
     show: false,
     frame: false,
-    icon: getIconPath("icon.ico"),
+    icon: windowIcon,
     autoHideMenuBar: true,
-    ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,

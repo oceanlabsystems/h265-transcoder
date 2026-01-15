@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## 1.0.0 (2026-01-15)
+
+
+### Features
+
+* init application ([3a7c8bf](https://github.com/oceanlabsystems/h265-transcoder/commit/3a7c8bf54a84de990c2cb33b1ad5b3de995e114a))
+
 ## 1.0.0 (2025-03-19)
 
 

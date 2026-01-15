@@ -194,10 +194,13 @@ jobs:
 
       - name: Build application (Windows)
         if: matrix.platform == 'win'
-        shell: cmd
+        shell: bash
         run: |
           npm run build
           npx electron-builder --win --x64 --publish never
+          echo "=== Contents of dist folder ==="
+          ls -la dist/ || echo "dist folder not found"
+          find dist -name "*.exe" 2>/dev/null || echo "No .exe files found"
 
       - name: Build application (macOS)
         if: matrix.platform == 'mac'
@@ -216,9 +219,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: dist/**/*.exe
+          path: |
+            dist/*.exe
+            dist/**/*.exe
           retention-days: 90
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload macOS artifacts
         if: matrix.platform == 'mac'

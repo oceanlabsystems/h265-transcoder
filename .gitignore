@@ -2,3 +2,4 @@
 /out
 /gstreamer
 *.msi
+/dist

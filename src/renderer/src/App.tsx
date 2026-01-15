@@ -102,9 +102,7 @@ function VideoProcessor() {
   const [outputFormat, setOutputFormat] = useState<"mp4" | "mkv" | "mov">(
     "mkv"
   );
-  const [encoder, setEncoder] = useState<"x265" | "nvh265" | "qsvh265">(
-    "qsvh265"
-  );
+  const [encoder, setEncoder] = useState<"x265" | "nvh265" | "qsvh265">("x265");
   const [speedPreset, setSpeedPreset] = useState<
     | "ultrafast"
     | "veryfast"
@@ -487,9 +485,9 @@ function VideoProcessor() {
                         className="w-full"
                         size="middle"
                       >
+                        <Option value="x265">x265 (CPU)</Option>
                         <Option value="qsvh265">Intel QSV</Option>
                         <Option value="nvh265">NVIDIA NVENC</Option>
-                        <Option value="x265">x265 (CPU)</Option>
                       </Select>
                     </div>
                     {encoder === "x265" && (

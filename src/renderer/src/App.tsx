@@ -150,12 +150,24 @@ function VideoProcessor() {
 
         if (status.status === "completed") {
           setProcessing(false);
-          toast.success(
-            `Batch complete! Processed ${status.totalFiles} file(s).`
-          );
+          if (status.error) {
+            // Completed with some errors
+            toast.warning(
+              `Batch complete with issues: ${status.totalFiles} file(s) processed. ${status.error}`
+            );
+          } else {
+            toast.success(
+              `Batch complete! Processed ${status.totalFiles} file(s).`
+            );
+          }
         } else if (status.status === "error") {
           setProcessing(false);
           toast.error(`Error: ${status.error || "Unknown error"}`);
+        } else if (status.status === "processing" && status.error) {
+          // File was skipped due to error, show warning toast
+          toast.warning(
+            `Skipped file: ${status.currentFile} - ${status.error}`
+          );
         }
       }
     );
@@ -391,7 +403,7 @@ function VideoProcessor() {
                         type="text"
                         value={inputDir}
                         readOnly
-                        placeholder="Select folder with video input files..."
+                        placeholder="Select source folder..."
                         className="input-field flex-1 min-w-0 text-xs sm:text-sm py-2 sm:py-2.5"
                       />
                       <button

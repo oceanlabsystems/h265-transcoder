@@ -7,6 +7,76 @@ import * as fs from "fs";
 import { processVideoFile } from "./gstreamer/video-split";
 import { BatchProcessConfig, ProcessStatus } from "./types/types";
 
+// Supported video file extensions
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".mkv",
+  ".mov",
+  ".avi",
+  ".wmv",
+  ".flv",
+  ".webm",
+  ".m4v",
+  ".mpg",
+  ".mpeg",
+  ".m2v",
+  ".ts",
+  ".mts",
+  ".m2ts",
+  ".vob",
+  ".3gp",
+  ".3g2",
+  ".f4v",
+  ".ogv",
+  ".divx",
+  ".asf",
+]);
+
+// Check if a file is a video file based on extension
+function isVideoFile(filename: string): boolean {
+  const ext = path.extname(filename).toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+// Recursively scan directory for video files
+function scanDirectoryRecursive(
+  dirPath: string,
+  baseDir: string = dirPath
+): Array<{ name: string; path: string; relativePath: string }> {
+  const results: Array<{ name: string; path: string; relativePath: string }> =
+    [];
+
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      // Skip hidden files/directories
+      if (entry.name.startsWith(".") || entry.name.startsWith("._")) {
+        continue;
+      }
+
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recursively scan subdirectories
+        results.push(...scanDirectoryRecursive(fullPath, baseDir));
+      } else if (entry.isFile() && isVideoFile(entry.name)) {
+        // Calculate relative path from base directory
+        const relativePath = path.relative(baseDir, fullPath);
+        results.push({
+          name: entry.name,
+          path: fullPath,
+          relativePath: relativePath,
+        });
+      }
+    }
+  } catch (error) {
+    console.error(`Error scanning directory ${dirPath}:`, error);
+  }
+
+  return results;
+}
+
 // Disable GPU and hardware acceleration to run on lower end machines
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("disable-gpu");
@@ -190,23 +260,11 @@ function setupIpcHandlers(): void {
       if (!fs.existsSync(dirPath)) {
         return [];
       }
-      const files = fs
-        .readdirSync(dirPath)
-        .filter((file) => {
-          const lowerFile = file.toLowerCase();
-          // Filter out macOS metadata files (start with ._)
-          // Filter out hidden files (start with .)
-          // Only include .mov files
-          return (
-            lowerFile.endsWith(".mov") &&
-            !file.startsWith("._") &&
-            !file.startsWith(".")
-          );
-        })
-        .map((file) => ({
-          name: file,
-          path: path.join(dirPath, file),
-        }));
+      // Recursively scan for all video files
+      const files = scanDirectoryRecursive(dirPath);
+      console.log(
+        `Found ${files.length} video file(s) in ${dirPath} (recursive scan)`
+      );
       return files;
     } catch (error) {
       console.error("Error scanning directory:", error);
@@ -226,33 +284,23 @@ function setupIpcHandlers(): void {
           fs.mkdirSync(config.outputDirectory, { recursive: true });
         }
 
-        // Scan for .MOV files and get their sizes for byte-based progress tracking
-        const files = fs
-          .readdirSync(config.inputDirectory)
-          .filter((file) => {
-            const lowerFile = file.toLowerCase();
-            // Filter out macOS metadata files (start with ._)
-            // Filter out hidden files (start with .)
-            // Only include .mov files
-            return (
-              lowerFile.endsWith(".mov") &&
-              !file.startsWith("._") &&
-              !file.startsWith(".")
-            );
-          })
-          .map((file) => {
-            const filePath = path.join(config.inputDirectory, file);
-            const stats = fs.statSync(filePath);
-            return {
-              path: filePath,
-              name: file,
-              size: stats.size, // File size in bytes
-            };
-          });
+        // Recursively scan for video files and get their sizes for byte-based progress tracking
+        const scannedFiles = scanDirectoryRecursive(config.inputDirectory);
+        const files = scannedFiles.map((file) => {
+          const stats = fs.statSync(file.path);
+          return {
+            path: file.path,
+            name: file.name,
+            relativePath: file.relativePath,
+            size: stats.size, // File size in bytes
+          };
+        });
 
         if (files.length === 0) {
-          throw new Error("No .MOV files found in input directory");
+          throw new Error("No video files found in input directory");
         }
+
+        console.log(`Starting batch process for ${files.length} video file(s)`);
 
         const totalFiles = files.length;
 
@@ -260,7 +308,9 @@ function setupIpcHandlers(): void {
         const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
         let processedFiles = 0;
+        let skippedFiles = 0;
         let totalBytesProcessed = 0; // Track total bytes processed across all files
+        const errors: Array<{ file: string; error: string }> = []; // Track all errors
 
         // Send initial status
         sendProgressUpdate({
@@ -279,7 +329,7 @@ function setupIpcHandlers(): void {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
           const filePath = file.path;
-          const fileName = file.name;
+          const fileName = file.relativePath || file.name; // Show relative path if available
           const fileSize = file.size;
 
           sendProgressUpdate({
@@ -401,60 +451,59 @@ function setupIpcHandlers(): void {
             // After file completes, add its bytes to the total
             totalBytesProcessed += fileSize;
             processedFiles++;
+            console.log(`Successfully processed: ${fileName}`);
           } catch (error) {
             console.error(`Error processing ${fileName}:`, error);
             const errorMessage =
               error instanceof Error ? error.message : String(error);
 
-            // Check if it's a file format error (like macOS metadata files)
-            if (
-              errorMessage.includes("Could not determine type of stream") ||
-              errorMessage.includes("Could not parse duration")
-            ) {
-              console.warn(
-                `Skipping invalid file: ${fileName} - ${errorMessage}`
-              );
-              // Skip this file and continue with the next one
-              sendProgressUpdate({
-                currentFile: fileName,
-                currentFileIndex: i + 1,
-                totalFiles,
-                currentChunk: 0,
-                totalChunks: 0,
-                fileProgress: 0,
-                chunkProgress: 0,
-                overallProgress: Math.round(
-                  (processedFiles / totalFiles) * 100
-                ),
-                status: "processing",
-                error: `Skipped: ${errorMessage}`,
-              });
-              // Don't throw - continue processing other files
-            } else {
-              // For other errors, update status but continue processing
-              sendProgressUpdate({
-                currentFile: fileName,
-                currentFileIndex: i + 1,
-                totalFiles,
-                currentChunk: 0,
-                totalChunks: 0,
-                fileProgress: 0,
-                chunkProgress: 0,
-                overallProgress: Math.round(
-                  (processedFiles / totalFiles) * 100
-                ),
-                status: "error",
-                error: errorMessage,
-              });
-              // Optionally: continue processing other files instead of throwing
-              // Uncomment the next line to skip errors and continue:
-              // continue;
-              throw error;
-            }
+            // Track the error
+            errors.push({ file: fileName, error: errorMessage });
+            skippedFiles++;
+
+            // Add file bytes to processed (we're skipping it, so it counts towards progress)
+            totalBytesProcessed += fileSize;
+
+            // Log the error and notify user, but continue processing
+            console.warn(
+              `Skipping file due to error: ${fileName} - ${errorMessage}`
+            );
+
+            sendProgressUpdate({
+              currentFile: fileName,
+              currentFileIndex: i + 1,
+              totalFiles,
+              currentChunk: 0,
+              totalChunks: 0,
+              fileProgress: 0,
+              chunkProgress: 0,
+              overallProgress: Math.round(
+                (totalBytesProcessed / totalBytes) * 100
+              ),
+              status: "processing",
+              error: `Failed: ${errorMessage}`,
+            });
+
+            // Continue to next file instead of breaking
+            continue;
           }
         }
 
-        // Send completion status
+        // Log summary
+        console.log(
+          `Batch processing complete: ${processedFiles} succeeded, ${skippedFiles} failed`
+        );
+        if (errors.length > 0) {
+          console.log("Failed files:");
+          errors.forEach((e) => console.log(`  - ${e.file}: ${e.error}`));
+        }
+
+        // Send completion status with error summary if any
+        const completionMessage =
+          skippedFiles > 0
+            ? `Completed with ${skippedFiles} error(s)`
+            : undefined;
+
         sendProgressUpdate({
           currentFile: "",
           currentFileIndex: totalFiles,
@@ -465,9 +514,10 @@ function setupIpcHandlers(): void {
           chunkProgress: 100,
           overallProgress: 100,
           status: "completed",
+          error: completionMessage,
         });
 
-        return { success: true, processedFiles };
+        return { success: true, processedFiles, skippedFiles, errors };
       } catch (error) {
         sendProgressUpdate({
           currentFile: "",

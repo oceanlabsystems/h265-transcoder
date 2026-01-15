@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { BatchProcessConfig, ProcessStatus } from "../types/types";
+import { BatchProcessConfig } from "../types/types";
 import * as path from "path";
 import * as fs from "fs";
 import { getGstLaunchPath, getGStreamerPath } from "../utils/gstreamer-path";
@@ -320,9 +320,7 @@ export function processVideoFile(
     // Progress tracking variables
     let errorOutput = "";
     let lastFileProgress = 0;
-    let lastChunkProgress = 0;
     let currentChunk = 0;
-    let lastChunkCount = 0;
     let progressUpdateInterval: NodeJS.Timeout | null = null;
     const startTime = Date.now();
 
@@ -342,7 +340,6 @@ export function processVideoFile(
       // Count existing chunks and track file sizes (BYTE-BASED MEASUREMENT)
       let chunkCount = 0;
       let totalOutputSize = 0;
-      let currentChunkSize = 0;
 
       try {
         // Always check for the first chunk file (even if it doesn't exist yet)
@@ -358,7 +355,6 @@ export function processVideoFile(
             const stats = fs.statSync(firstChunkPath);
             const chunkSize = stats.size;
             totalOutputSize = chunkSize;
-            currentChunkSize = chunkSize;
 
             // For MP4/MOV, even zero-size files indicate processing has started
             // For MKV, we only count non-zero files
@@ -385,7 +381,6 @@ export function processVideoFile(
                 const stats = fs.statSync(chunkPath);
                 const chunkSize = stats.size;
                 totalOutputSize += chunkSize;
-                currentChunkSize = chunkSize;
 
                 // For MP4/MOV, count even zero-size files (they're buffering)
                 // For MKV, only count non-zero files
@@ -414,7 +409,6 @@ export function processVideoFile(
       // Update current chunk
       if (chunkCount > 0) {
         currentChunk = chunkCount;
-        lastChunkCount = chunkCount;
       } else if (fileDuration > 0) {
         // No chunks yet, but we're processing - assume chunk 1
         currentChunk = 1;
@@ -693,7 +687,7 @@ export function processVideoFile(
         } else if (totalChunks > 0 && currentChunk > 0) {
           // Estimate chunk ETA based on expected chunk duration
           const expectedChunkTime = expectedTotalTime / totalChunks;
-          const chunkStartTime = (currentChunk - 1) * expectedChunkTime;
+          // const chunkStartTime = (currentChunk - 1) * expectedChunkTime; // Available for debugging
           const chunkEndTime = currentChunk * expectedChunkTime;
           const remainingChunkTime = Math.max(0, chunkEndTime - elapsed);
           chunkEta = Math.round(remainingChunkTime);
@@ -719,15 +713,13 @@ export function processVideoFile(
         }
       }
 
-      // Always send updates periodically, or when values change significantly
-      const shouldUpdate =
-        fileProgress !== lastFileProgress ||
-        chunkCount !== lastChunkCount ||
-        Math.abs(chunkProgress - lastChunkProgress) > 1; // Update if chunk progress changed by more than 1%
-
-      // Also update every few seconds even if nothing changed (for MP4/MOV buffering)
+      // Track update timing for MP4/MOV buffering
       const timeSinceLastUpdate = Date.now() - (lastUpdateTime || startTime);
-      const forceUpdate = timeSinceLastUpdate > 2000; // Force update every 2 seconds
+      
+      // Note: shouldUpdate and forceUpdate were previously used for conditional updates
+      // Now we always send updates since the interval ensures regular updates
+      // This is important for MP4/MOV files that buffer until completion
+      void timeSinceLastUpdate; // Suppress unused warning - kept for potential future optimization
 
       // Always send update - the interval ensures we update regularly
       // This is important for MP4/MOV files that buffer until completion
@@ -755,7 +747,6 @@ export function processVideoFile(
         processingSpeed,
       });
       lastFileProgress = fileProgress;
-      lastChunkProgress = chunkProgress;
       lastUpdateTime = Date.now();
     };
 

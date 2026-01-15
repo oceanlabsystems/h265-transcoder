@@ -127,7 +127,7 @@ function setupIpcHandlers(): void {
   });
 
   // Generic app status events
-  ipcMain.on("app:action", (event, action: string, data?: any) => {
+  ipcMain.on("app:action", (_event, action: string, data?: any) => {
     // Handle app actions here
     console.log(`Received app action: ${action}`, data);
   });
@@ -352,7 +352,6 @@ function setupIpcHandlers(): void {
                   }
                 } else if (progressStatus.fileEta !== undefined) {
                   // Fallback: estimate based on remaining files and current file ETA
-                  const remainingFiles = totalFiles - (i + 1);
                   const remainingBytes = totalBytes - totalProcessedBytes;
                   const currentFileRemainingBytes =
                     fileSize - currentFileProcessedBytes;

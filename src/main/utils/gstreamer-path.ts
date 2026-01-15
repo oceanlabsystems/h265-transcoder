@@ -100,9 +100,23 @@ export function getGStreamerPath(): {
     libPath = testLibPath;
   } else {
     // Linux GStreamer structure
-    binPath = path.join(gstRoot, 'bin');
-    pluginPath = path.join(gstRoot, 'lib', 'gstreamer-1.0');
-    libPath = path.join(gstRoot, 'lib');
+    let testBinPath = path.join(gstRoot, 'bin');
+    let testPluginPath = path.join(gstRoot, 'lib', 'gstreamer-1.0');
+    let testLibPath = path.join(gstRoot, 'lib');
+    
+    // Try linux subdirectory (from our CI extraction)
+    if (!fs.existsSync(path.join(testBinPath, 'gst-launch-1.0'))) {
+      const linuxBinPath = path.join(gstRoot, 'linux', 'bin');
+      if (fs.existsSync(path.join(linuxBinPath, 'gst-launch-1.0'))) {
+        testBinPath = linuxBinPath;
+        testPluginPath = path.join(gstRoot, 'linux', 'lib', 'gstreamer-1.0');
+        testLibPath = path.join(gstRoot, 'linux', 'lib');
+      }
+    }
+    
+    binPath = testBinPath;
+    pluginPath = testPluginPath;
+    libPath = testLibPath;
   }
 
   // Check if bundled GStreamer exists
@@ -111,20 +125,30 @@ export function getGStreamerPath(): {
 
   if (hasBundledGStreamer) {
     // Use bundled GStreamer
+    const envVars: NodeJS.ProcessEnv = {
+      PATH: `${binPath}${path.delimiter}${process.env.PATH}`,
+      GST_PLUGIN_PATH: pluginPath,
+      GST_PLUGIN_SYSTEM_PATH: pluginPath,
+    };
+    
+    if (platform === 'win32') {
+      // Windows-specific environment variables
+      envVars.GSTREAMER_1_0_ROOT_MSVC_X86_64 = gstRoot;
+      envVars.GSTREAMER_1_0_ROOT_MSVC_X86 = gstRoot;
+    } else if (platform === 'linux') {
+      // Linux-specific: add library path
+      envVars.LD_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.LD_LIBRARY_PATH || ''}`;
+    } else if (platform === 'darwin') {
+      // macOS-specific: add dylib path
+      envVars.DYLD_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.DYLD_LIBRARY_PATH || ''}`;
+      envVars.DYLD_FALLBACK_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.DYLD_FALLBACK_LIBRARY_PATH || ''}`;
+    }
+    
     return {
       binPath,
       pluginPath,
       libPath,
-      env: {
-        PATH: `${binPath}${path.delimiter}${process.env.PATH}`,
-        GST_PLUGIN_PATH: pluginPath,
-        GST_PLUGIN_SYSTEM_PATH: pluginPath,
-        ...(platform === 'win32' && {
-          // Windows-specific environment variables
-          GSTREAMER_1_0_ROOT_MSVC_X86_64: gstRoot,
-          GSTREAMER_1_0_ROOT_MSVC_X86: gstRoot,
-        }),
-      },
+      env: envVars,
     };
   } else {
     // Fall back to system GStreamer - try common installation locations

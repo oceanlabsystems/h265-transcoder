@@ -4,6 +4,7 @@
  */
 
 const https = require("https");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
@@ -26,36 +27,135 @@ function downloadFile(url, outputPath) {
     console.log(`Downloading ${url}...`);
     const file = fs.createWriteStream(outputPath);
 
-    https
-      .get(url, (response) => {
-        if (response.statusCode === 302 || response.statusCode === 301) {
-          // Follow redirect
-          return downloadFile(response.headers.location, outputPath)
+    // Parse URL to get hostname and path
+    const urlObj = new URL(url);
+
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+        Connection: "keep-alive",
+        Referer: urlObj.origin,
+      },
+    };
+
+    const protocol = urlObj.protocol === "https:" ? https : http;
+
+    const req = protocol.request(options, (response) => {
+      // Handle redirects
+      if (
+        response.statusCode === 302 ||
+        response.statusCode === 301 ||
+        response.statusCode === 307 ||
+        response.statusCode === 308
+      ) {
+        file.close();
+        fs.unlink(outputPath, () => {});
+        const redirectUrl = response.headers.location;
+        if (redirectUrl) {
+          // Handle relative redirects
+          const absoluteRedirectUrl = redirectUrl.startsWith("http")
+            ? redirectUrl
+            : `${urlObj.protocol}//${urlObj.hostname}${redirectUrl}`;
+          console.log(`Following redirect to: ${absoluteRedirectUrl}`);
+          return downloadFile(absoluteRedirectUrl, outputPath)
             .then(resolve)
             .catch(reject);
         }
+      }
 
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to download: ${response.statusCode}`));
-          return;
-        }
-
-        response.pipe(file);
-        file.on("finish", () => {
-          file.close();
-          console.log(`Downloaded to ${outputPath}`);
-          resolve();
-        });
-      })
-      .on("error", (err) => {
+      if (response.statusCode !== 200) {
+        file.close();
         fs.unlink(outputPath, () => {});
-        reject(err);
+        let errorMsg = `Failed to download: ${response.statusCode} ${response.statusMessage || ""}`;
+        if (response.statusCode === 403) {
+          errorMsg +=
+            "\n\nThe server returned a 403 Forbidden error. This could mean:";
+          errorMsg +=
+            "\n- The file may have been moved or is no longer available";
+          errorMsg += "\n- The server is blocking automated downloads";
+          errorMsg +=
+            "\n- Please try downloading manually from: https://gstreamer.freedesktop.org/download/";
+        } else if (response.statusCode === 404) {
+          errorMsg += "\n\nThe file was not found. The URL may have changed.";
+          errorMsg +=
+            "\nPlease check: https://gstreamer.freedesktop.org/download/";
+        }
+        reject(new Error(errorMsg));
+        return;
+      }
+
+      // Track download progress
+      const totalSize = parseInt(response.headers["content-length"] || "0", 10);
+      let downloadedSize = 0;
+
+      response.on("data", (chunk) => {
+        downloadedSize += chunk.length;
+        if (totalSize > 0) {
+          const percent = ((downloadedSize / totalSize) * 100).toFixed(1);
+          process.stdout.write(
+            `\rDownloading... ${percent}% (${(downloadedSize / 1024 / 1024).toFixed(2)} MB / ${(totalSize / 1024 / 1024).toFixed(2)} MB)`
+          );
+        }
       });
+
+      response.pipe(file);
+      file.on("finish", () => {
+        file.close();
+        if (totalSize > 0) {
+          console.log(""); // New line after progress
+        }
+        console.log(`Downloaded to ${outputPath}`);
+        resolve();
+      });
+    });
+
+    req.on("error", (err) => {
+      file.close();
+      fs.unlink(outputPath, () => {});
+      reject(err);
+    });
+
+    req.end();
   });
 }
 
 function extractMsi(msiPath, extractDir) {
   console.log(`Extracting ${msiPath}...`);
+
+  // Validate MSI file exists and is readable
+  if (!fs.existsSync(msiPath)) {
+    throw new Error(`MSI file not found: ${msiPath}`);
+  }
+
+  const stats = fs.statSync(msiPath);
+  if (stats.size === 0) {
+    throw new Error(
+      `MSI file is empty: ${msiPath}\n` +
+        `Please delete the file and run the script again to re-download it.\n` +
+        `Or manually delete: ${msiPath}`
+    );
+  }
+
+  // Check if MSI file has valid header (MSI files start with specific bytes)
+  const msiHeader = Buffer.alloc(8);
+  const fd = fs.openSync(msiPath, "r");
+  fs.readSync(fd, msiHeader, 0, 8, 0);
+  fs.closeSync(fd);
+
+  // MSI files typically start with D0 CF 11 E0 A1 B1 1A E1 (OLE2 format)
+  const isValidMsi = msiHeader[0] === 0xd0 && msiHeader[1] === 0xcf;
+  if (!isValidMsi) {
+    console.log("⚠️  Warning: MSI file may be corrupted or invalid format");
+    console.log("   File header doesn't match expected MSI format");
+    console.log("   Continuing anyway...");
+  }
 
   // Ensure extract directory exists
   if (!fs.existsSync(extractDir)) {
@@ -200,8 +300,57 @@ function extractMsi(msiPath, extractDir) {
     );
   }
 
+  // Method 0: Check if GStreamer is already installed on the system
+  const checkInstalledGStreamer = () => {
+    console.log("Checking for existing GStreamer installation...");
+    const commonInstallPaths = [
+      path.join(
+        process.env.ProgramFiles || "C:\\Program Files",
+        "gstreamer",
+        "1.0",
+        "msvc_x86_64"
+      ),
+      path.join(
+        process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+        "gstreamer",
+        "1.0",
+        "msvc_x86_64"
+      ),
+      path.join(
+        process.env.ProgramFiles || "C:\\Program Files",
+        "GStreamer",
+        "1.0",
+        "msvc_x86_64"
+      ),
+      path.join(
+        process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+        "GStreamer",
+        "1.0",
+        "msvc_x86_64"
+      ),
+    ];
+
+    for (const installPath of commonInstallPaths) {
+      const gstLaunchPath = path.join(installPath, "bin", "gst-launch-1.0.exe");
+      if (fs.existsSync(gstLaunchPath)) {
+        console.log(`Found installed GStreamer at: ${installPath}`);
+        console.log(`Copying to: ${extractDir}`);
+        copyDirectory(installPath, extractDir);
+
+        const verifyPath = path.join(extractDir, "bin", "gst-launch-1.0.exe");
+        if (fs.existsSync(verifyPath)) {
+          console.log("✓ Successfully copied from system installation");
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // Try multiple extraction methods
   const methods = [
+    // Method 0.5: Check for existing installation
+    checkInstalledGStreamer,
     // Method 1: msiexec with proper admin install syntax
     () => {
       console.log("Trying msiexec extraction (method 1)...");
@@ -285,28 +434,69 @@ function extractMsi(msiPath, extractDir) {
         return false;
       }
     },
-    // Method 3: PowerShell script (simple version)
+    // Method 3: PowerShell script (tries multiple methods)
     () => {
       console.log("Trying PowerShell extraction script...");
       try {
         const psScript = path.join(__dirname, "extract-gstreamer-simple.ps1");
         if (fs.existsSync(psScript)) {
-          execSync(
-            `powershell -ExecutionPolicy Bypass -File "${psScript}" -MsiPath "${msiPath}" -ExtractDir "${extractDir}"`,
-            {
-              stdio: "pipe",
-              shell: true,
-              timeout: 120000, // 2 minute timeout
-            }
-          );
+          try {
+            execSync(
+              `powershell -ExecutionPolicy Bypass -File "${psScript}" -MsiPath "${msiPath}" -ExtractDir "${extractDir}"`,
+              {
+                stdio: "pipe",
+                shell: true,
+                timeout: 180000, // 3 minute timeout
+              }
+            );
+          } catch (error) {
+            // PowerShell script may exit with error even if it partially succeeded
+            // Check if files were extracted anyway
+            console.log(
+              `PowerShell script exited with error: ${error.message}`
+            );
+          }
+
+          // Check if extraction succeeded regardless of exit code
           const gstLaunchPath = path.join(
             extractDir,
             "bin",
             "gst-launch-1.0.exe"
           );
-          if (fs.existsSync(gstLaunchPath)) {
-            console.log("✓ PowerShell script extraction successful");
-            return true;
+
+          // Also check alternative paths
+          const alternativePaths = [
+            gstLaunchPath,
+            path.join(
+              extractDir,
+              "MSVC-x86_64-1.0",
+              "bin",
+              "gst-launch-1.0.exe"
+            ),
+            path.join(
+              extractDir,
+              "1.0",
+              "msvc_x86_64",
+              "bin",
+              "gst-launch-1.0.exe"
+            ),
+          ];
+
+          for (const checkPath of alternativePaths) {
+            if (fs.existsSync(checkPath)) {
+              // If found in alternative location, move to expected location
+              if (checkPath !== gstLaunchPath) {
+                const sourceDir = path.dirname(path.dirname(checkPath));
+                console.log(
+                  `Found files at: ${sourceDir}, copying to expected location...`
+                );
+                copyDirectory(sourceDir, extractDir);
+              }
+              if (fs.existsSync(gstLaunchPath)) {
+                console.log("✓ PowerShell script extraction successful");
+                return true;
+              }
+            }
           }
         }
         return false;
@@ -685,11 +875,136 @@ async function setupGStreamer(targetPlatform) {
     return;
   }
 
-  // Download if not exists
+  // Check if GStreamer is already installed on the system
+  console.log("Checking for existing GStreamer installation on system...");
+  const commonInstallPaths = [
+    path.join(
+      process.env.ProgramFiles || "C:\\Program Files",
+      "gstreamer",
+      "1.0",
+      "msvc_x86_64"
+    ),
+    path.join(
+      process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+      "gstreamer",
+      "1.0",
+      "msvc_x86_64"
+    ),
+    path.join(
+      process.env.ProgramFiles || "C:\\Program Files",
+      "GStreamer",
+      "1.0",
+      "msvc_x86_64"
+    ),
+    path.join(
+      process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+      "GStreamer",
+      "1.0",
+      "msvc_x86_64"
+    ),
+  ];
+
+  for (const installPath of commonInstallPaths) {
+    const systemGstLaunch = path.join(installPath, "bin", "gst-launch-1.0.exe");
+    if (fs.existsSync(systemGstLaunch)) {
+      console.log(`Found installed GStreamer at: ${installPath}`);
+      console.log(`Copying to: ${extractDir}`);
+
+      // Ensure extract directory exists
+      if (!fs.existsSync(extractDir)) {
+        fs.mkdirSync(extractDir, { recursive: true });
+      }
+
+      copyDirectory(installPath, extractDir);
+
+      if (fs.existsSync(gstLaunchPath)) {
+        console.log("✓ Successfully copied from system installation");
+        console.log("\nGStreamer setup complete!");
+        console.log(`Location: ${extractDir}`);
+        return;
+      }
+    }
+  }
+  console.log("No existing GStreamer installation found on system.");
+
+  // Download if not exists or if file is empty/corrupted
+  let needsDownload = false;
   if (!fs.existsSync(msiPath)) {
-    await downloadFile(url, msiPath);
+    needsDownload = true;
   } else {
-    console.log("MSI file already exists. Skipping download.");
+    // Validate existing file
+    const stats = fs.statSync(msiPath);
+    if (stats.size === 0) {
+      console.log("MSI file is empty. Re-downloading...");
+      fs.unlinkSync(msiPath);
+      needsDownload = true;
+    } else {
+      // Check MSI file header to ensure it's valid
+      try {
+        const msiHeader = Buffer.alloc(8);
+        const fd = fs.openSync(msiPath, "r");
+        fs.readSync(fd, msiHeader, 0, 8, 0);
+        fs.closeSync(fd);
+
+        // MSI files typically start with D0 CF 11 E0 A1 B1 1A E1 (OLE2 format)
+        const isValidMsi = msiHeader[0] === 0xd0 && msiHeader[1] === 0xcf;
+        if (!isValidMsi) {
+          console.log(
+            "MSI file appears corrupted (invalid header). Re-downloading..."
+          );
+          fs.unlinkSync(msiPath);
+          needsDownload = true;
+        } else {
+          console.log(
+            "MSI file already exists and appears valid. Skipping download."
+          );
+        }
+      } catch (error) {
+        console.log(
+          `Error validating MSI file: ${error.message}. Re-downloading...`
+        );
+        try {
+          fs.unlinkSync(msiPath);
+        } catch (e) {
+          // Ignore deletion errors
+        }
+        needsDownload = true;
+      }
+    }
+  }
+
+  if (needsDownload) {
+    try {
+      await downloadFile(url, msiPath);
+    } catch (error) {
+      console.error("\n❌ Failed to download GStreamer MSI file automatically");
+      console.error(`Error: ${error.message}\n`);
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("MANUAL SETUP OPTIONS:");
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+      console.log("Option 1: Install GStreamer on your system (RECOMMENDED)");
+      console.log("  1. Visit: https://gstreamer.freedesktop.org/download/");
+      console.log(
+        "  2. Download the Windows MSVC x86_64 installer for version 1.22.10"
+      );
+      console.log("  3. Run the installer and install GStreamer");
+      console.log("  4. Run the build command again - it will detect the installation\n");
+
+      console.log("Option 2: Download MSI file manually");
+      console.log(`  1. Download from: ${url}`);
+      console.log(`  2. Save to: ${msiPath}`);
+      console.log("  3. Run the build command again\n");
+
+      console.log("Option 3: Copy from existing installation");
+      console.log(
+        "  If you have GStreamer installed elsewhere, copy the msvc_x86_64 folder to:"
+      );
+      console.log(`  ${extractDir}\n`);
+
+      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+      throw error;
+    }
   }
 
   // Extract MSI

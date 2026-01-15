@@ -3,7 +3,7 @@ import { getVideoInput } from './video-in';
 import { getVideoConvert } from './video-convert';
 import { getEncoder } from './video-encode';
 import { getRtpOutput } from './video-rtp';
-import { StreamConfig } from '@types/types';
+import { StreamConfig } from '../types/types';
 import { getGstLaunchPath, getGStreamerPath } from '../utils/gstreamer-path';
 
 

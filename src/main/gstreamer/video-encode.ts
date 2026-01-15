@@ -1,4 +1,4 @@
-import { StreamConfig } from '@types/types';
+import { StreamConfig } from '../types/types';
 
 
 export function getEncoder(config: StreamConfig): string[] {

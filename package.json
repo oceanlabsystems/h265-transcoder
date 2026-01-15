@@ -1,14 +1,14 @@
 {
-  "name": "sub-video-processor",
-  "version": "1.0.0",
-  "description": "An application to batch process .MOV files into 30min chunks and output to H.265",
+  "name": "h265-transcoder",
+  "version": "0.0.1",
+  "description": "An application to batch process videofiles into time based chunks and output to H.265",
   "main": "./out/main/index.js",
-  "author": "Online Systems",
-  "homepage": "www.onlinesystems.au",
+  "author": "Oceanlab Systems",
+  "homepage": "www.oceanlabsystems.com",
   "license": "Proprietary",
   "build": {
-    "appId": "com.oceanlabsystems.sub-video-processor",
-    "productName": "Sub Video Processor",
+    "appId": "com.oceanlabsystems.h265-transcoder",
+    "productName": "H265 Transcoder",
     "directories": {
       "output": "dist"
     },

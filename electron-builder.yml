@@ -1,24 +1,49 @@
-appId: com.electron.app
-productName: 360-ui
+appId: com.oceanlabsystems.h265-transcoder
+productName: H265 Transcoder
 directories:
   buildResources: build
+  output: dist
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.{js,ts,mjs,cjs}"
+  - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - out/**/*
+  - resources/**/*
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/*.d.ts"
+  - "!**/node_modules/.bin"
 asarUnpack:
   - resources/**
+extraResources:
+  - from: gstreamer
+    to: gstreamer
+    filter:
+      - "**/*"
+      - "!**/*.msi"
+      - "!**/*.pkg"
 win:
-  executableName: 360-ui
+  executableName: sub-video-processor
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
 nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
 mac:
+  icon: resources/icon.png
+  category: public.app-category.utilities
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -26,14 +51,23 @@ mac:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  icon: resources/icon.png
   target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  maintainer: Oceanlab Systems
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}

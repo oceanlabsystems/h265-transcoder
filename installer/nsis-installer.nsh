@@ -34,7 +34,7 @@ Function ServiceConfigPage
   ${NSD_CreateLabel} 0 70u 100% 12u "Service configuration file:"
   Pop $0
   
-  StrCpy $ConfigPath "${PROGRAMDATA}\H265 Transcoder\config.yaml"
+  StrCpy $ConfigPath "$PROGRAMDATA\H265 Transcoder\config.yaml"
   ${NSD_CreateText} 0 85u 100% 12u $ConfigPath
   Pop $0
   ${NSD_Edit_SetReadOnly} $0 1
@@ -64,14 +64,14 @@ Section "H265 Transcoder" SecMain
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\H265 Transcoder.lnk" "$INSTDIR\H265 Transcoder.exe" "" "$INSTDIR\H265 Transcoder.exe" 0
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\Install Service.lnk" "powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\service\install-service.ps1"' "" "" SW_SHOWNORMAL "" "Install H265 Transcoder as a Windows service"
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\Uninstall Service.lnk" "powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\service\uninstall-service.ps1"' "" "" SW_SHOWNORMAL "" "Remove H265 Transcoder Windows service"
-  CreateShortCut "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk" "notepad.exe" "${PROGRAMDATA}\H265 Transcoder\config.yaml" "" "" SW_SHOWNORMAL "" "Edit service configuration"
+  CreateShortCut "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk" "notepad.exe" "$PROGRAMDATA\H265 Transcoder\config.yaml" "" "" SW_SHOWNORMAL "" "Edit service configuration"
   
   ; Create config directory
-  CreateDirectory "${PROGRAMDATA}\H265 Transcoder"
+  CreateDirectory "$PROGRAMDATA\H265 Transcoder"
   
   ; Copy default config if not exists
-  IfFileExists "${PROGRAMDATA}\H265 Transcoder\config.yaml" +2 0
-    CopyFiles "$INSTDIR\service\config.example.yaml" "${PROGRAMDATA}\H265 Transcoder\config.yaml"
+  IfFileExists "$PROGRAMDATA\H265 Transcoder\config.yaml" +2 0
+    CopyFiles "$INSTDIR\service\config.example.yaml" "$PROGRAMDATA\H265 Transcoder\config.yaml"
 SectionEnd
 
 ; Post-install: optionally install service
@@ -98,7 +98,7 @@ Section "un.H265 Transcoder"
   Delete "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk"
   RMDir "$SMPROGRAMS\H265 Transcoder"
   
-  ; Note: Config files are preserved at ${PROGRAMDATA}\H265 Transcoder
+  ; Note: Config files are preserved at $PROGRAMDATA\H265 Transcoder
   ; User can manually delete if desired
 SectionEnd
 

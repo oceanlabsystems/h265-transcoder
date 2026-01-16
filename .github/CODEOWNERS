@@ -3,7 +3,7 @@
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # All files require approval from the repository owner
-* @oceanlabsystems
+* @oceanlabsystems @postmodernic
 
 # Optional: You can specify specific owners for specific paths
 # For example:

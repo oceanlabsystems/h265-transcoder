@@ -15,8 +15,35 @@ const VIDEO_EXTENSIONS = new Set([
   '.3gp', '.3g2', '.f4v', '.ogv', '.divx', '.asf',
 ]);
 
-function isVideoFile(filename: string): boolean {
+function isVideoFile(filePath: string): boolean {
+  const filename = path.basename(filePath).toLowerCase();
   const ext = path.extname(filename).toLowerCase();
+  
+  // Exclude TypeScript definition files (.d.ts)
+  if (filename.endsWith('.d.ts')) {
+    return false;
+  }
+  
+  // Exclude paths containing common code directories
+  const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+  const excludedDirs = [
+    '/node_modules/',
+    '/.git/',
+    '/dist/',
+    '/build/',
+    '/out/',
+    '/.next/',
+    '/.nuxt/',
+    '/vendor/',
+    '/__pycache__/',
+    '/.venv/',
+    '/venv/',
+  ];
+  
+  if (excludedDirs.some(dir => normalizedPath.includes(dir))) {
+    return false;
+  }
+  
   return VIDEO_EXTENSIONS.has(ext);
 }
 
@@ -38,7 +65,7 @@ function scanDirectoryRecursive(
 
       if (entry.isDirectory()) {
         results.push(...scanDirectoryRecursive(fullPath, baseDir));
-      } else if (entry.isFile() && isVideoFile(entry.name)) {
+      } else if (entry.isFile() && isVideoFile(fullPath)) {
         const relativePath = path.relative(baseDir, fullPath);
         results.push({
           name: entry.name,
@@ -297,6 +324,12 @@ async function main() {
         '**/*.part',      // Ignore partial downloads
         '**/*.tmp',       // Ignore temp files
         '**/*.crdownload', // Chrome downloads
+        '**/node_modules/**', // Ignore node_modules
+        '**/dist/**',     // Ignore dist directories
+        '**/build/**',    // Ignore build directories
+        '**/out/**',      // Ignore out directories
+        '**/.git/**',     // Ignore git directories
+        '**/*.d.ts',      // Ignore TypeScript definition files
       ],
     });
 

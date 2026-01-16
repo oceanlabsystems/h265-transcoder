@@ -45,8 +45,35 @@ const VIDEO_EXTENSIONS = new Set([
 ]);
 
 // Check if a file is a video file based on extension
-function isVideoFile(filename: string): boolean {
+function isVideoFile(filePath: string): boolean {
+  const filename = path.basename(filePath).toLowerCase();
   const ext = path.extname(filename).toLowerCase();
+  
+  // Exclude TypeScript definition files (.d.ts)
+  if (filename.endsWith('.d.ts')) {
+    return false;
+  }
+  
+  // Exclude paths containing common code directories
+  const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+  const excludedDirs = [
+    '/node_modules/',
+    '/.git/',
+    '/dist/',
+    '/build/',
+    '/out/',
+    '/.next/',
+    '/.nuxt/',
+    '/vendor/',
+    '/__pycache__/',
+    '/.venv/',
+    '/venv/',
+  ];
+  
+  if (excludedDirs.some(dir => normalizedPath.includes(dir))) {
+    return false;
+  }
+  
   return VIDEO_EXTENSIONS.has(ext);
 }
 
@@ -561,6 +588,12 @@ function setupIpcHandlers(): void {
             "**/*.part",
             "**/*.tmp",
             "**/*.crdownload",
+            "**/node_modules/**", // Ignore node_modules
+            "**/dist/**",     // Ignore dist directories
+            "**/build/**",    // Ignore build directories
+            "**/out/**",      // Ignore out directories
+            "**/.git/**",     // Ignore git directories
+            "**/*.d.ts",      // Ignore TypeScript definition files
           ],
         });
 

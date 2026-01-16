@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.3.3](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.3.2...v1.3.3) (2026-01-16)
+
+
+### Features
+
+* allow cancellation of in progress processing ([632004c](https://github.com/oceanlabsystems/h265-transcoder/commit/632004ccce92b89205a75a9be6f2979732c56df7))
+
+
+### Bug Fixes
+
+* exclude typescript files from detection ([5bd83f0](https://github.com/oceanlabsystems/h265-transcoder/commit/5bd83f071230f7797c4c4e008a83c71beb883294))
+* mac and linux path passing format to gstreamer ([1d9b2ae](https://github.com/oceanlabsystems/h265-transcoder/commit/1d9b2ae3ea3f9cff5d996f28d70ad0e7e39b06ba))
+
 ### [1.3.2](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.3.1...v1.3.2) (2026-01-16)
 
 

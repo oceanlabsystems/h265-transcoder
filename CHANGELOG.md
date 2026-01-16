@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.4.0](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.3.3...v1.4.0) (2026-01-16)
+
+
+### Features
+
+* improve progress calculations by using gstreamer progress updates. auto detect encoders ([68fe0cb](https://github.com/oceanlabsystems/h265-transcoder/commit/68fe0cb001c27df4496cf71c085300e7340db70c))
+
 ### [1.3.3](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.3.2...v1.3.3) (2026-01-16)
 
 

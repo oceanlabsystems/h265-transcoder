@@ -1,0 +1,49 @@
+# H265 Transcoder Service Configuration
+# Copy this file to: %ProgramData%\H265 Transcoder\config.yaml
+# and edit the paths below
+
+# Required: Input directory to monitor for new video files
+input: C:\Videos\Input
+
+# Required: Output directory for processed files
+output: C:\Videos\Output
+
+# Encoder options:
+#   x265    - Software encoder (CPU, works everywhere, slower)
+#   nvh265  - NVIDIA GPU encoder (fast, requires NVIDIA GPU)
+#   qsvh265 - Intel Quick Sync (fast, requires Intel GPU)
+encoder: x265
+
+# Output format: mp4, mkv, mov
+# Recommended: mkv (supports more codecs, better streaming)
+format: mkv
+
+# Chunk duration in minutes
+# Videos longer than this will be split into multiple files
+chunkDurationMinutes: 60
+
+# Speed preset for x265 encoder (ignored for hardware encoders)
+# Options: ultrafast, veryfast, faster, fast, medium, slow, slower, veryslow
+# Faster = larger files, slower = smaller files
+speedPreset: medium
+
+# Bitrate in kbps (optional, leave empty for auto)
+# bitrate: 8000
+
+# Enable watch mode - required for service operation
+watch: true
+
+# Optional: Move original files here after successful processing
+# Uncomment to enable:
+# processedDir: C:\Videos\Processed
+
+# Optional: Move failed files here for manual review
+# Uncomment to enable:
+# failedDir: C:\Videos\Failed
+
+# Number of files to process simultaneously
+# Increase for faster processing if you have a powerful CPU/GPU
+concurrency: 1
+
+# Log level: debug, info, warn, error
+logLevel: info

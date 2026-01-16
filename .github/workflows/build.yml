@@ -10,6 +10,9 @@ on:
         description: "Version tag (e.g., v1.0.0)"
         required: false
 
+env:
+  DOCKER_IMAGE: oceanlabsystems/h265-transcoder
+
 jobs:
   build:
     name: Build for ${{ matrix.platform }}
@@ -36,14 +39,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # Note: npm cache disabled due to platform-specific rollup binaries issue
-          # cache: "npm"
 
       - name: Install dependencies
         shell: bash
         run: |
-          # Remove node_modules and package-lock to fix rollup platform-specific binaries
-          # See: https://github.com/npm/cli/issues/4828
           rm -rf node_modules || true
           rm -f package-lock.json || true
           npm install
@@ -56,17 +55,14 @@ jobs:
         run: |
           $extractDir = "gstreamer/x64"
 
-          # Check if already set up
           if (Test-Path "$extractDir/bin/gst-launch-1.0.exe") {
             Write-Host "GStreamer already set up"
             exit 0
           }
 
-          # Install GStreamer using Chocolatey (pre-installed on GitHub runners)
           Write-Host "Installing GStreamer via Chocolatey..."
           choco install gstreamer gstreamer-devel -y --no-progress
 
-          # Find where Chocolatey installed GStreamer
           $gstRoot = $null
           $possibleRoots = @(
             "C:\gstreamer\1.0\msvc_x86_64",
@@ -85,7 +81,6 @@ jobs:
           }
 
           if (-not $gstRoot) {
-            # Try to find it anywhere
             $gstExe = Get-ChildItem -Path "C:\" -Recurse -Filter "gst-launch-1.0.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($gstExe) {
               $gstRoot = Split-Path (Split-Path $gstExe.FullName)
@@ -98,35 +93,29 @@ jobs:
             exit 1
           }
 
-          # Copy only essential GStreamer runtime files (not dev files)
           Write-Host "Copying essential GStreamer files to $extractDir..."
           New-Item -ItemType Directory -Force -Path "$extractDir/bin" | Out-Null
           New-Item -ItemType Directory -Force -Path "$extractDir/lib/gstreamer-1.0" | Out-Null
 
-          # Copy only DLLs from bin (runtime libraries)
           Write-Host "Copying DLLs..."
           Copy-Item -Path "$gstRoot/bin/*.dll" -Destination "$extractDir/bin/" -Force
 
-          # Copy only essential executables
           Write-Host "Copying essential executables..."
-          $essentialExes = @("gst-launch-1.0.exe", "gst-inspect-1.0.exe", "gst-typefind-1.0.exe")
+          $essentialExes = @("gst-launch-1.0.exe", "gst-inspect-1.0.exe", "gst-typefind-1.0.exe", "gst-discoverer-1.0.exe")
           foreach ($exe in $essentialExes) {
             if (Test-Path "$gstRoot/bin/$exe") {
               Copy-Item -Path "$gstRoot/bin/$exe" -Destination "$extractDir/bin/" -Force
             }
           }
 
-          # Copy plugin DLLs
           Write-Host "Copying plugins..."
           Copy-Item -Path "$gstRoot/lib/gstreamer-1.0/*.dll" -Destination "$extractDir/lib/gstreamer-1.0/" -Force
 
-          # Copy libexec if it exists (plugin scanner)
           if (Test-Path "$gstRoot/libexec") {
             New-Item -ItemType Directory -Force -Path "$extractDir/libexec" | Out-Null
             Copy-Item -Path "$gstRoot/libexec/*" -Destination "$extractDir/libexec/" -Recurse -Force
           }
 
-          # Verify and show size
           if (Test-Path "$extractDir/bin/gst-launch-1.0.exe") {
             Write-Host "GStreamer setup successful"
             $size = (Get-ChildItem -Path $extractDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
@@ -143,19 +132,15 @@ jobs:
           echo "Installing GStreamer via Homebrew..."
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
-          # Create gstreamer directory for bundling
           mkdir -p gstreamer/macos
 
-          # Get GStreamer paths from brew
           GSTREAMER_PREFIX=$(brew --prefix gstreamer)
           echo "GStreamer installed at: $GSTREAMER_PREFIX"
 
-          # Copy GStreamer libraries and plugins for bundling
           if [ -d "$GSTREAMER_PREFIX" ]; then
             cp -R $GSTREAMER_PREFIX/lib gstreamer/macos/ || true
             cp -R $GSTREAMER_PREFIX/libexec gstreamer/macos/ || true
             
-            # Also copy plugin directories
             GST_PLUGIN_PATH=$(brew --prefix)/lib/gstreamer-1.0
             if [ -d "$GST_PLUGIN_PATH" ]; then
               mkdir -p gstreamer/macos/lib/gstreamer-1.0
@@ -163,15 +148,13 @@ jobs:
             fi
           fi
 
-          # Create a bin directory with symlinks/copies
           mkdir -p gstreamer/macos/bin
-          for tool in gst-launch-1.0 gst-inspect-1.0 gst-typefind-1.0; do
+          for tool in gst-launch-1.0 gst-inspect-1.0 gst-typefind-1.0 gst-discoverer-1.0; do
             if command -v $tool &> /dev/null; then
               cp $(which $tool) gstreamer/macos/bin/ || true
             fi
           done
 
-          # Verify
           ls -la gstreamer/macos/
           echo "GStreamer setup complete for macOS"
         continue-on-error: false
@@ -192,29 +175,28 @@ jobs:
             libgstreamer-plugins-base1.0-dev \
             libx265-dev
 
-          # Create gstreamer directory and copy system GStreamer for bundling
           mkdir -p gstreamer/linux/bin
           mkdir -p gstreamer/linux/lib
 
-          # Copy GStreamer tools
           cp /usr/bin/gst-launch-1.0 gstreamer/linux/bin/ || true
           cp /usr/bin/gst-inspect-1.0 gstreamer/linux/bin/ || true
+          cp /usr/bin/gst-discoverer-1.0 gstreamer/linux/bin/ || true
 
-          # Copy GStreamer libraries
           cp -P /usr/lib/x86_64-linux-gnu/libgstreamer-1.0.so* gstreamer/linux/lib/ || true
           cp -P /usr/lib/x86_64-linux-gnu/libgstbase-1.0.so* gstreamer/linux/lib/ || true
           cp -P /usr/lib/x86_64-linux-gnu/libgstvideo-1.0.so* gstreamer/linux/lib/ || true
           cp -P /usr/lib/x86_64-linux-gnu/libgstaudio-1.0.so* gstreamer/linux/lib/ || true
           cp -P /usr/lib/x86_64-linux-gnu/libgstpbutils-1.0.so* gstreamer/linux/lib/ || true
 
-          # Copy GStreamer plugins
           mkdir -p gstreamer/linux/lib/gstreamer-1.0
           cp /usr/lib/x86_64-linux-gnu/gstreamer-1.0/*.so gstreamer/linux/lib/gstreamer-1.0/ || true
 
-          # Verify
           ls -la gstreamer/linux/bin/
           echo "GStreamer setup complete for Linux"
         continue-on-error: false
+
+      - name: Build CLI
+        run: npm run cli:build
 
       - name: Build application (Windows)
         if: matrix.platform == 'win'
@@ -224,7 +206,6 @@ jobs:
           npx electron-builder --win --x64 --publish never
           echo "=== Contents of dist folder ==="
           ls -la dist/ || echo "dist folder not found"
-          find dist -name "*.exe" 2>/dev/null || echo "No .exe files found"
 
       - name: Build application (macOS)
         if: matrix.platform == 'mac'
@@ -237,6 +218,46 @@ jobs:
         run: |
           npm run build
           npx electron-builder --linux --publish never
+
+      - name: Create Linux CLI package
+        if: matrix.platform == 'linux'
+        run: |
+          echo "Creating Linux CLI package..."
+          mkdir -p dist/linux-cli/cli
+          mkdir -p dist/linux-cli/service
+          
+          # Copy CLI files
+          cp -r out/cli dist/linux-cli/
+          
+          # Copy service files
+          cp installer/service/*.yaml dist/linux-cli/service/
+          cp installer/service/*.service dist/linux-cli/service/
+          cp installer/service/*.sh dist/linux-cli/service/ 2>/dev/null || true
+          
+          # Copy only required node_modules
+          mkdir -p dist/linux-cli/node_modules
+          for dep in commander chokidar yaml readdirp braces picomatch fill-range to-regex-range is-number normalize-path glob-parent is-glob is-extglob anymatch binary-extensions is-binary-path; do
+            if [ -d "node_modules/$dep" ]; then
+              cp -r "node_modules/$dep" dist/linux-cli/node_modules/
+            fi
+          done
+          
+          # Create launcher script
+          cat > dist/linux-cli/h265-transcoder-cli << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          node "$SCRIPT_DIR/cli/cli/index.js" "$@"
+          EOF
+          chmod +x dist/linux-cli/h265-transcoder-cli
+          
+          # Create install script
+          cp scripts/install-linux.sh dist/linux-cli/install.sh
+          chmod +x dist/linux-cli/install.sh
+          
+          # Create tarball
+          cd dist
+          tar -czvf h265-transcoder-cli-linux-x64.tar.gz linux-cli
+          ls -la *.tar.gz
 
       - name: Upload Windows artifacts
         if: matrix.platform == 'win'
@@ -267,9 +288,81 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
+      - name: Upload Linux CLI package
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-cli
+          path: dist/h265-transcoder-cli-linux-x64.tar.gz
+          retention-days: 90
+          if-no-files-found: warn
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build CLI
+        run: npm run cli:build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push Docker image
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   create-release:
     name: Create Release
-    needs: build
+    needs: [build, build-docker]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -297,25 +390,41 @@ jobs:
           body: |
             ## H265 Transcoder ${{ steps.get_version.outputs.version }}
 
-            ### Downloads
+            ### Desktop Application
 
-            **Windows:**
-            - Installer: Download from artifacts below
+            | Platform | Download |
+            |----------|----------|
+            | Windows | `h265-transcoder-*-setup.exe` |
+            | macOS | `h265-transcoder-*.dmg` |
+            | Linux | `h265-transcoder-*.AppImage` or `.deb` |
 
-            **macOS:**
-            - DMG: Download from artifacts below
+            ### Headless Server (CLI)
 
-            **Linux:**
-            - AppImage: Download from artifacts below
-            - DEB package: Download from artifacts below
+            **Docker (Recommended):**
+            ```bash
+            docker pull ${{ env.DOCKER_IMAGE }}:${{ steps.get_version.outputs.version }}
+            ```
+
+            **Linux CLI Package:**
+            Download `h265-transcoder-cli-linux-x64.tar.gz` and run:
+            ```bash
+            tar -xzvf h265-transcoder-cli-linux-x64.tar.gz
+            cd linux-cli
+            sudo ./install.sh
+            ```
 
             ### Changes
             See [CHANGELOG.md](CHANGELOG.md) for details.
+
+            ### Documentation
+            - [README](README.md) - Full documentation
+            - [Docker Setup](README.md#docker-headless-linux-servers) - Docker deployment guide
           files: |
             artifacts/windows-installer/*Setup*.exe
             artifacts/macos-installer/*.dmg
             artifacts/linux-installer/*.AppImage
             artifacts/linux-installer/*.deb
+            artifacts/linux-cli/*.tar.gz
           draft: false
           prerelease: false
         env:

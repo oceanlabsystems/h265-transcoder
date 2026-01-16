@@ -1,423 +1,324 @@
 # H265 Transcoder
 
-A professional desktop application for batch processing video files into H.265 encoded chunks. Built with Electron, React, and GStreamer, this tool efficiently splits large video files (especially .MOV files) into configurable time-based segments and transcodes them to H.265 format.
+A professional video transcoding solution with both a desktop GUI application and a headless CLI service. Built with Electron, React, and GStreamer, this tool efficiently splits large video files into configurable time-based segments and transcodes them to H.265 format.
 
 ## Overview
 
-**H265 Transcoder** is designed for processing large video files, particularly those from underwater cameras or other recording devices. It automatically:
+**H265 Transcoder** is designed for processing large video files, particularly those from underwater cameras or other recording devices. It offers two modes of operation:
 
-- Scans directories for video files
-- Splits videos into configurable time-based chunks (default: 30 minutes)
-- Transcodes to H.265 (HEVC) format for efficient storage
-- Supports hardware acceleration (NVIDIA NVENC, Intel Quick Sync) and software encoding
-- Provides real-time progress tracking with ETA calculations
-- Processes multiple files in batch with detailed status updates
+- **GUI Application** - Desktop app for manual batch processing with visual progress tracking
+- **CLI Service** - Headless service for automated directory monitoring and processing
 
-## Features
+### Key Features
 
-### Core Functionality
-
-- **Batch Processing**: Process entire directories of video files automatically
-- **Intelligent Chunking**: Split videos into configurable time segments (default: 30 minutes)
-- **Multiple Encoders**:
-  - **x265** (Software) - High quality, CPU-based encoding
-  - **nvh265** (NVIDIA NVENC) - Hardware-accelerated on NVIDIA GPUs
-  - **qsvh265** (Intel Quick Sync) - Hardware-accelerated on Intel GPUs
-- **Output Formats**: MP4, MKV, or MOV containers
-- **Progress Tracking**: Real-time progress with file-level and chunk-level metrics
-- **ETA Calculation**: Accurate time estimates based on processing speed
-- **Error Handling**: Robust error detection and reporting
-
-### User Interface
-
-- **Modern Dark Theme**: Clean, professional interface with custom styling
-- **Real-time Status**: Live progress bars and status updates
-- **File Management**: Easy directory selection and file scanning
-- **Configuration Options**: Adjustable chunk duration, encoder, format, and quality settings
-- **Responsive Design**: Works across different window sizes
-
-### Technical Features
-
-- **GStreamer Integration**: Bundled GStreamer for reliable video processing
-- **Cross-platform**: Windows, macOS, and Linux support
-- **Hardware Acceleration**: Automatic detection and use of available hardware encoders
-- **Progress Monitoring**: Byte-based and time-based progress calculation
-- **Incremental File Writing**: MKV format supports incremental file growth visibility
-
-## Technology Stack
-
-- **Framework**: Electron 31.x
-- **Frontend**: React 18.x with TypeScript
-- **UI Library**: Ant Design 5.x
-- **Styling**: Tailwind CSS with custom CSS variables
-- **Video Processing**: GStreamer 1.22.10+
-- **Build Tool**: Electron Vite
-- **Package Manager**: npm/yarn
+- 🎬 Batch process entire directories of video files
+- ✂️ Split videos into configurable time-based chunks
+- 🚀 Hardware acceleration (NVIDIA NVENC, Intel Quick Sync) or software encoding
+- 👁️ **Watch Mode** - Monitor directories for new files and process automatically
+- 🐳 **Docker Support** - Easy deployment on Linux servers
+- ⚡ Real-time progress tracking with ETA calculations
+- 🔄 Auto-restart on failure when running as a service
 
 ## Installation
 
-### Prerequisites
+### Desktop Application (Windows/macOS/Linux)
 
-- Node.js 18+ and npm/yarn
-- Git (for cloning the repository)
+Download the latest installer from [Releases](https://github.com/oceanlabsystems/h265-transcoder/releases):
 
-### Setup
+| Platform | Download                          |
+| -------- | --------------------------------- |
+| Windows  | `h265-transcoder-X.X.X-setup.exe` |
+| macOS    | `h265-transcoder-X.X.X.dmg`       |
+| Linux    | `h265-transcoder-X.X.X.AppImage`  |
 
-1. **Clone the repository**:
+The installer includes both the GUI application and CLI service tools.
 
-   ```bash
-   git clone https://github.com/oceanlabsystems/h265-transcoder.git
-   cd h265-transcoder
-   ```
+### Docker (Headless Linux Servers)
 
-2. **Install dependencies**:
-
-   ```bash
-   yarn
-   # or
-   npm install
-   ```
-
-3. **Download GStreamer** (automatic):
-
-   ```bash
-   npm run download-gstreamer
-   ```
-
-   This automatically downloads and extracts GStreamer binaries for your platform. The script runs automatically before building, but you can run it manually for development.
-
-   For manual setup instructions, see [docs/GSTREAMER_SETUP.md](docs/GSTREAMER_SETUP.md).
-
-## Development
-
-### Running in Development Mode
+The recommended way to run on headless servers:
 
 ```bash
-yarn dev
+# Create directories
+mkdir -p h265-transcoder/{input,output,config}
+cd h265-transcoder
+
+# Create configuration
+cat > config/config.yaml << 'EOF'
+input: /input
+output: /output
+encoder: x265
+format: mkv
+chunkDurationMinutes: 60
+watch: true
+concurrency: 1
+EOF
+
+# Run with Docker
+docker run -d \
+  --name h265-transcoder \
+  --restart unless-stopped \
+  -v $(pwd)/input:/input:ro \
+  -v $(pwd)/output:/output \
+  -v $(pwd)/config:/config \
+  oceanlabsystems/h265-transcoder:latest
 ```
 
-This starts the Electron app in development mode with hot module replacement (HMR) enabled.
-
-### Type Checking
+Or use Docker Compose:
 
 ```bash
-# Check both Node and Web TypeScript
-yarn typecheck
-
-# Check only Node code
-yarn typecheck:node
-
-# Check only Web code
-yarn typecheck:web
+curl -O https://raw.githubusercontent.com/oceanlabsystems/h265-transcoder/main/docker-compose.yml
+# Edit docker-compose.yml to set your paths
+docker-compose up -d
 ```
 
-### Linting and Formatting
+### One-Line Install (Linux)
+
+For direct installation on Linux servers:
 
 ```bash
-# Format code
-yarn format
-
-# Lint and auto-fix
-yarn lint
+curl -fsSL https://raw.githubusercontent.com/oceanlabsystems/h265-transcoder/main/scripts/install-linux.sh | sudo bash
 ```
-
-## Building
-
-### Development Build
-
-```bash
-# Build without packaging
-yarn build
-```
-
-### Production Builds
-
-Build for specific platforms:
-
-```bash
-# Windows (x64 and ia32)
-yarn build:win
-
-# Windows 64-bit only
-yarn build:win64
-
-# Windows 32-bit only
-yarn build:win32
-
-# macOS
-yarn build:mac
-
-# Linux
-yarn build:linux
-```
-
-**Note**: GStreamer is automatically included in the build. Ensure you've run `npm run download-gstreamer` before building.
-
-### Build Output
-
-Built applications are output to the `dist/` directory:
-
-- **Windows**: NSIS installer (`.exe`)
-- **macOS**: DMG package
-- **Linux**: AppImage and DEB packages
 
 ## Usage
 
-### Basic Workflow
+### GUI Application
 
-1. **Select Input Directory**: Click "Select Input Directory" and choose the folder containing your video files
-2. **Select Output Directory**: Choose where processed chunks should be saved
+1. **Select Input Directory** - Choose folder containing video files
+2. **Select Output Directory** - Choose destination for processed files
 3. **Configure Settings**:
-   - **Chunk Duration**: Set the length of each output chunk (default: 30 minutes)
-   - **Output Format**: Choose MP4, MKV, or MOV
-   - **Encoder**: Select x265 (Software), nvh265 (NVIDIA), or qsvh265 (Intel)
-   - **Speed Preset**: For x265 encoder, choose encoding speed vs quality tradeoff
-4. **Start Processing**: Click "Start Processing" to begin batch processing
+   - **Chunk Duration**: Length of each output segment (1-120 minutes)
+   - **Output Format**: MP4, MKV, or MOV
+   - **Encoder**: x265 (CPU), NVIDIA NVENC, or Intel Quick Sync
+   - **Speed Preset**: Encoding speed vs quality tradeoff (x265 only)
+4. **Start Processing** - Click "Start Batch" for one-time processing
 
-### Configuration Options
+#### Watch Mode (GUI)
 
-#### Chunk Duration
+Click **"Watch Mode"** to continuously monitor the input directory:
 
-- Range: 1-60 minutes
-- Default: 30 minutes
-- Videos are split at this interval
+- New files are automatically detected and queued
+- Processing continues until you stop watch mode
+- Status shows processed/queued/failed counts
 
-#### Output Format
+### CLI Service
 
-- **MP4**: Widely compatible, buffers until completion (files appear after chunk is done)
-- **MKV**: Supports incremental writing (files grow as they're processed)
-- **MOV**: QuickTime format, buffers until completion
+#### Basic Commands
 
-#### Encoders
+```bash
+# One-time batch processing
+h265-transcoder-cli --input /videos/in --output /videos/out
 
-##### x265 (Software)
+# Watch mode (continuous monitoring)
+h265-transcoder-cli --input /videos/in --output /videos/out --watch
 
-- Works on all systems
-- High quality output
-- Configurable speed presets: ultrafast, veryfast, faster, fast, medium, slow, slower, veryslow
-- Slower than hardware encoders but more compatible
+# With configuration file
+h265-transcoder-cli --config /etc/h265-transcoder/config.yaml --watch
 
-##### nvh265 (NVIDIA NVENC)
-
-- Requires NVIDIA GPU with NVENC support
-- Fast encoding (typically 0.5x-1.0x realtime)
-- Best performance for NVIDIA GPU users
-- Automatically falls back to x265 if unavailable
-
-##### qsvh265 (Intel Quick Sync)
-
-- Requires Intel CPU with integrated graphics
-- Fast encoding (typically 0.25x-0.4x realtime)
-- Good for systems with Intel integrated graphics
-- Automatically falls back to x265 if unavailable
-
-### Progress Tracking
-
-The application provides detailed progress information:
-
-- **File Progress**: Overall progress for the current file (0-100%)
-- **Chunk Progress**: Progress within the current chunk (0-100%)
-- **Processing Speed**: Encoding speed relative to video duration (e.g., 0.5x = half realtime)
-- **ETA**: Estimated time remaining for current chunk, current file, and overall batch
-- **File Information**: Current file name, chunk number, and total chunks
-
-### Output Files
-
-Processed files are named using the pattern:
-
-```text
-{original-filename}_01.{format}
-{original-filename}_02.{format}
-...
+# Full options
+h265-transcoder-cli \
+  --input /videos/in \
+  --output /videos/out \
+  --encoder x265 \
+  --format mkv \
+  --chunk-duration 60 \
+  --speed-preset medium \
+  --watch \
+  --processed-dir /videos/done \
+  --failed-dir /videos/failed
 ```
 
-For example, `VIDEO001.MOV` becomes:
+#### Configuration File
 
-- `VIDEO001_01.mp4`
-- `VIDEO001_02.mp4`
-- `VIDEO001_03.mp4`
-- etc.
+```yaml
+# /etc/h265-transcoder/config.yaml
+input: /mnt/videos/input
+output: /mnt/videos/output
+encoder: x265 # x265, nvh265, qsvh265
+format: mkv # mp4, mkv, mov
+chunkDurationMinutes: 60
+speedPreset: medium # ultrafast to veryslow
+watch: true
+processedDir: /mnt/videos/processed # Optional
+failedDir: /mnt/videos/failed # Optional
+concurrency: 1
+```
 
-## Architecture
+#### Running as a Service
+
+**Linux (systemd):**
+
+```bash
+sudo systemctl enable h265-transcoder
+sudo systemctl start h265-transcoder
+sudo journalctl -u h265-transcoder -f  # View logs
+```
+
+**Windows:**
+Use the Start Menu shortcuts or run as Administrator:
+
+```powershell
+# Install service
+.\service\install-service.ps1
+
+# Manage service
+Start-Service H265TranscoderService
+Stop-Service H265TranscoderService
+```
+
+## Encoders
+
+| Encoder     | Type             | Speed     | Compatibility |
+| ----------- | ---------------- | --------- | ------------- |
+| **x265**    | Software (CPU)   | 0.1-0.3x  | All systems   |
+| **nvh265**  | NVIDIA NVENC     | 0.5-1.0x  | NVIDIA GPUs   |
+| **qsvh265** | Intel Quick Sync | 0.25-0.4x | Intel GPUs    |
+
+Speed is relative to video duration (1.0x = realtime).
+
+## Output Files
+
+Files are named with sequential chunk numbers:
+
+```
+VIDEO001.MOV → VIDEO001_01.mkv, VIDEO001_02.mkv, VIDEO001_03.mkv, ...
+```
+
+## Docker Configuration
+
+### Environment Variables
+
+| Variable      | Description         | Default               |
+| ------------- | ------------------- | --------------------- |
+| `CONFIG_PATH` | Path to config file | `/config/config.yaml` |
+| `NODE_ENV`    | Node environment    | `production`          |
+
+### Volumes
+
+| Path         | Description                                |
+| ------------ | ------------------------------------------ |
+| `/input`     | Source video files (read-only recommended) |
+| `/output`    | Processed output files                     |
+| `/config`    | Configuration file                         |
+| `/processed` | Optional: move originals after success     |
+| `/failed`    | Optional: move failed files                |
+
+### Docker Compose Example
+
+```yaml
+version: "3.8"
+services:
+  h265-transcoder:
+    image: oceanlabsystems/h265-transcoder:latest
+    container_name: h265-transcoder
+    restart: unless-stopped
+    volumes:
+      - /mnt/nas/incoming:/input:ro
+      - /mnt/nas/transcoded:/output
+      - ./config:/config
+    environment:
+      - NODE_ENV=production
+```
+
+## Development
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+### Setup
+
+```bash
+git clone https://github.com/oceanlabsystems/h265-transcoder.git
+cd h265-transcoder
+npm install
+npm run download-gstreamer
+```
+
+### Development Commands
+
+```bash
+# Run GUI in development mode
+npm run dev
+
+# Build CLI only
+npm run cli:build
+
+# Run CLI in development
+npm run cli:dev -- --input ./test/in --output ./test/out
+
+# Build for production
+npm run build:win    # Windows
+npm run build:mac    # macOS
+npm run build:linux  # Linux
+
+# Build Docker image
+npm run docker:build
+```
 
 ### Project Structure
 
-```text
-sub-video-processor/
+```
+h265-transcoder/
 ├── src/
 │   ├── main/              # Electron main process
-│   │   ├── gstreamer/     # GStreamer pipeline implementations
-│   │   │   ├── video-split.ts    # Main video splitting logic
-│   │   │   ├── video-encode.ts   # Encoding utilities
-│   │   │   └── ...
-│   │   ├── types/         # TypeScript type definitions
-│   │   ├── utils/         # Utility functions
-│   │   └── index.ts       # Main process entry point
-│   ├── preload/           # Preload scripts (IPC bridge)
-│   └── renderer/          # React frontend
-│       └── src/
-│           ├── App.tsx    # Main application component
-│           └── ...
-├── gstreamer/             # Bundled GStreamer binaries
-├── resources/             # App icons and resources
-├── scripts/              # Build and utility scripts
-└── docs/                 # Documentation
+│   │   ├── gstreamer/     # Video processing wrapper
+│   │   ├── types/         # TypeScript types
+│   │   └── utils/         # Utilities
+│   ├── preload/           # IPC bridge
+│   ├── renderer/          # React GUI
+│   └── core/              # Shared code (CLI + Electron)
+│       ├── gstreamer/     # Core video processing
+│       ├── types/         # Shared types
+│       └── utils/         # Shared utilities
+├── cli/                   # CLI entry point
+├── installer/             # Service installation scripts
+│   └── service/
+├── gstreamer/             # Bundled GStreamer (Windows)
+├── Dockerfile             # Docker image definition
+└── docker-compose.yml     # Docker Compose template
 ```
-
-### Key Components
-
-**Main Process** (`src/main/index.ts`)
-
-- Manages Electron window lifecycle
-- Handles IPC communication
-- Coordinates video processing
-- Manages file system operations
-
-**Video Processing** (`src/main/gstreamer/video-split.ts`)
-
-- GStreamer pipeline construction
-- Progress tracking and ETA calculation
-- Chunk file management
-- Error handling and recovery
-
-**Renderer Process** (`src/renderer/src/App.tsx`)
-
-- React-based UI
-- User interaction handling
-- Progress display
-- Configuration management
-
-**Preload Script** (`src/preload/index.ts`)
-
-- Secure IPC bridge between renderer and main process
-- Exposes safe API to frontend
-
-## GStreamer Integration
-
-This application bundles GStreamer to avoid requiring users to install third-party dependencies. The bundled GStreamer is automatically:
-
-- Downloaded during build preparation
-- Extracted to the `gstreamer/` directory
-- Included in the final application package
-- Configured with proper environment variables at runtime
-
-For detailed GStreamer setup information, see [docs/GSTREAMER_SETUP.md](docs/GSTREAMER_SETUP.md).
-
-### GStreamer Pipeline
-
-The application uses GStreamer pipelines for video processing:
-
-```text
-uridecodebin → videoconvert → [encoder] → h265parse → splitmuxsink
-```
-
-- **uridecodebin**: Automatically handles demuxing and decoding of various formats
-- **videoconvert**: Converts to encoder-compatible format (NV12 for hardware, I420 for software)
-- **encoder**: x265enc, nvh265enc, or qsvh265enc
-- **h265parse**: Parses H.265 stream
-- **splitmuxsink**: Splits output into time-based chunks
-
-## CI/CD and Releases
-
-This project uses GitHub Actions for automated builds and releases. See [docs/CI_CD.md](docs/CI_CD.md) for detailed information.
-
-### Creating a Release
-
-```bash
-# Patch release (1.0.0 -> 1.0.1)
-npm run release-patch
-
-# Minor release (1.0.0 -> 1.1.0)
-npm run release-minor
-
-# Major release (1.0.0 -> 2.0.0)
-npm run release-major
-```
-
-This automatically:
-
-- Updates version numbers
-- Generates changelog
-- Creates git tags
-- Triggers GitHub Actions to build for Windows, macOS, and Linux
-- Creates a GitHub Release with downloadable installers
 
 ## Troubleshooting
 
 ### GStreamer Not Found
 
-**Error**: `GStreamer executable not found`
+```bash
+# Linux: Install system GStreamer
+sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-{base,good,bad,ugly} gstreamer1.0-libav
 
-**Solutions**:
-
-1. Run `npm run download-gstreamer` to download GStreamer
-2. Verify `gstreamer/{arch}/bin/gst-launch-1.0.exe` exists
-3. Check the file structure matches expected layout
-4. See [docs/GSTREAMER_SETUP.md](docs/GSTREAMER_SETUP.md) for manual setup
+# Windows: Run download script
+npm run download-gstreamer
+```
 
 ### Encoder Not Available
 
-**Error**: `Access violation` or encoder-specific errors
+- **nvh265**: Install NVIDIA GPU drivers
+- **qsvh265**: Install Intel GPU drivers
+- **Fallback**: Use `x265` (works on all systems)
 
-**Solutions**:
+### Docker: Permission Denied
 
-- **nvh265**: Ensure NVIDIA GPU drivers are installed and up to date
-- **qsvh265**: Ensure Intel GPU drivers are installed; may not be available in all GStreamer builds
-- **Fallback**: Use x265 (Software) encoder which works on all systems
+```bash
+# Ensure output directory is writable
+chmod 777 ./output
+# Or run with specific user
+docker run --user $(id -u):$(id -g) ...
+```
 
 ### Progress Stuck at 0%
 
-**Cause**: MP4/MOV formats buffer until completion, so files don't appear until chunks are finished
+MP4/MOV formats buffer until chunk completion. Use MKV format for incremental progress visibility.
 
-**Solutions**:
+## CI/CD
 
-- Use MKV format for incremental file growth visibility
-- Wait for processing to complete (progress is time-based for buffering formats)
-- Check console logs for actual processing status
+Automated builds via GitHub Actions. Create releases with:
 
-### Large File Processing
-
-**Issue**: Very large files (>10GB) may have incorrect duration detection
-
-**Solutions**:
-
-- The application automatically estimates duration from file size if detection fails
-- Processing will continue with estimated duration
-- Check console logs for duration estimation warnings
-
-### Build Issues
-
-**Issue**: Build fails or GStreamer not included
-
-**Solutions**:
-
-1. Ensure `npm run download-gstreamer` completed successfully
-2. Check `gstreamer/` directory exists with proper structure
-3. Verify `prebuild` script runs before build
-4. Check build logs for specific errors
-
-## Development Guidelines
-
-### Code Style
-
-- TypeScript strict mode enabled
-- ESLint and Prettier configured
-- Follow existing code patterns
-- Use conventional commits (see `package.json` for commitizen config)
-
-### Adding Features
-
-1. **Main Process**: Add IPC handlers in `src/main/index.ts`
-2. **Preload**: Expose safe API in `src/preload/index.ts`
-3. **Renderer**: Use exposed API in React components
-4. **Types**: Define types in `src/main/types/types.ts`
-
-### Testing
-
-- Manual testing recommended for video processing
-- Test with various file formats and sizes
-- Verify hardware encoder availability on target systems
-- Test error handling and recovery
+```bash
+npm run release-patch  # 1.0.0 → 1.0.1
+npm run release-minor  # 1.0.0 → 1.1.0
+npm run release-major  # 1.0.0 → 2.0.0
+```
 
 ## License
 
@@ -425,17 +326,11 @@ MIT
 
 ## Support
 
-For issues, questions, or contributions, please refer to the project repository or contact the development team.
-
-## Recommended IDE Setup
-
-- [VSCode](https://code.visualstudio.com/)
-- [ESLint Extension](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
-- [Prettier Extension](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+- **Issues**: [GitHub Issues](https://github.com/oceanlabsystems/h265-transcoder/issues)
+- **Homepage**: [oceanlabsystems.com](https://www.oceanlabsystems.com)
 
 ---
 
-**Version**: 1.1.2  
+**Version**: 1.2.0  
 **Author**: Oceanlab Systems  
-**Homepage**: <https://www.oceanlabsystems.com>  
 **License**: [MIT](LICENSE)

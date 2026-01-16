@@ -31,9 +31,15 @@ export function getVideoDurationWithContext(
   context: RuntimeContext
 ): Promise<number> {
   return new Promise((resolve, reject) => {
-    const fileUri = inputPath
-      .replace(/\\/g, "/")
-      .replace(/^([A-Za-z]):/, "file:///$1:");
+    // Convert path to file:// URI format for GStreamer
+    let fileUri = inputPath.replace(/\\/g, "/");
+    if (/^[A-Za-z]:/.test(fileUri)) {
+      // Windows path: C:/path -> file:///C:/path
+      fileUri = fileUri.replace(/^([A-Za-z]):/, "file:///$1:");
+    } else if (fileUri.startsWith("/")) {
+      // Unix path: /path -> file:///path
+      fileUri = "file://" + fileUri;
+    }
 
     const { env: gstEnv } = getGStreamerPathWithContext(context);
     const processEnv = { ...process.env, ...gstEnv };
@@ -125,8 +131,8 @@ export function getVideoDurationWithContext(
 // Cancellation error class
 export class ProcessCancelledError extends Error {
   constructor() {
-    super('Processing was cancelled');
-    this.name = 'ProcessCancelledError';
+    super("Processing was cancelled");
+    this.name = "ProcessCancelledError";
   }
 }
 
@@ -146,7 +152,7 @@ export function processVideoFileWithContext(
 ): Promise<void> {
   return new Promise(async (resolve, reject) => {
     let isCancelled = false;
-    
+
     // Check if already aborted
     if (abortSignal?.aborted) {
       reject(new ProcessCancelledError());
@@ -248,10 +254,15 @@ export function processVideoFileWithContext(
       useHardwareFormat = false;
     }
 
-    // Convert Windows path to file:// URI format
-    const fileUri = inputPath
-      .replace(/\\/g, "/")
-      .replace(/^([A-Za-z]):/, "file:///$1:");
+    // Convert path to file:// URI format for GStreamer
+    let fileUri = inputPath.replace(/\\/g, "/");
+    if (/^[A-Za-z]:/.test(fileUri)) {
+      // Windows path: C:/path -> file:///C:/path
+      fileUri = fileUri.replace(/^([A-Za-z]):/, "file:///$1:");
+    } else if (fileUri.startsWith("/")) {
+      // Unix path: /path -> file:///path
+      fileUri = "file://" + fileUri;
+    }
 
     const args = [
       "uridecodebin",
@@ -317,22 +328,22 @@ export function processVideoFileWithContext(
       const abortHandler = () => {
         if (!isCancelled) {
           isCancelled = true;
-          console.log('[GStreamer] Processing cancelled by user');
-          gst.kill('SIGTERM');
+          console.log("[GStreamer] Processing cancelled by user");
+          gst.kill("SIGTERM");
           // Give it a moment, then force kill if needed
           setTimeout(() => {
             if (!gst.killed) {
-              gst.kill('SIGKILL');
+              gst.kill("SIGKILL");
             }
           }, 2000);
         }
       };
-      
-      abortSignal.addEventListener('abort', abortHandler, { once: true });
-      
+
+      abortSignal.addEventListener("abort", abortHandler, { once: true });
+
       // Clean up listener when process exits
-      gst.on('exit', () => {
-        abortSignal.removeEventListener('abort', abortHandler);
+      gst.on("exit", () => {
+        abortSignal.removeEventListener("abort", abortHandler);
       });
     }
 
@@ -686,7 +697,7 @@ export function processVideoFileWithContext(
       }
 
       // Check if this was a cancellation
-      if (isCancelled || signal === 'SIGTERM' || signal === 'SIGKILL') {
+      if (isCancelled || signal === "SIGTERM" || signal === "SIGKILL") {
         reject(new ProcessCancelledError());
         return;
       }

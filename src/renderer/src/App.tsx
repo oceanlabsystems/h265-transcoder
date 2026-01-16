@@ -152,6 +152,9 @@ function VideoProcessor() {
     stats: { filesProcessed: 0, filesFailed: 0, filesQueued: 0 },
   });
 
+  // App version
+  const [appVersion, setAppVersion] = useState<string>("");
+
   useEffect(() => {
     const cleanup = window.api.ipcRenderer.on(
       "video:progress-update",
@@ -232,6 +235,19 @@ function VideoProcessor() {
     checkMaximized();
     const interval = setInterval(checkMaximized, 500);
     return () => clearInterval(interval);
+  }, []);
+
+  // Fetch app version on mount
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const version = await window.api.ipcRenderer.invoke("app:get-version");
+        setAppVersion(version);
+      } catch (error) {
+        console.error("Failed to fetch app version:", error);
+      }
+    };
+    fetchVersion();
   }, []);
 
   const handleMinimize = async () => {
@@ -868,7 +884,7 @@ function VideoProcessor() {
           }}
         >
           <span className="hidden sm:inline">
-            H.265/HEVC Batch Transcoder • GStreamer Pipeline •{" "}
+            H.265/HEVC Batch Transcoder {appVersion && `v${appVersion}`} • GStreamer Pipeline •{" "}
             <a
               href="https://www.oceanlabsystems.com"
               target="_blank"
@@ -878,7 +894,9 @@ function VideoProcessor() {
               Powered by Oceanlab Systems
             </a>
           </span>
-          <span className="sm:hidden">H.265 Transcoder • GStreamer</span>
+          <span className="sm:hidden">
+            H.265 Transcoder {appVersion && `v${appVersion}`} • GStreamer
+          </span>
         </footer>
       </div>
     </ConfigProvider>

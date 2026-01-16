@@ -17,6 +17,7 @@ const api = {
         "window:minimize",
         "window:maximize",
         "window:is-maximized",
+        "app:get-version",
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);

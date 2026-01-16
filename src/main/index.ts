@@ -220,6 +220,11 @@ function setupIpcHandlers(): void {
     return window ? window.isMaximized() : false;
   });
 
+  // App info
+  ipcMain.handle("app:get-version", () => {
+    return app.getVersion();
+  });
+
   // Video processing IPC handlers
   ipcMain.handle("video:select-input-directory", async () => {
     const result = await dialog.showOpenDialog({

@@ -13,6 +13,7 @@ const api = {
         "video:cancel-batch-process",
         "video:start-watch-mode",
         "video:stop-watch-mode",
+        "video:detect-encoders",
         // Window controls
         "window:close",
         "window:minimize",

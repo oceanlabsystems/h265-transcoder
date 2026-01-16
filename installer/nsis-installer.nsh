@@ -1,18 +1,13 @@
 ; H265 Transcoder Custom NSIS Installer Script
 ; Installs both GUI application and CLI service tools
 
-!include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 
 ; Custom variables
 Var InstallService
 Var ConfigPath
-
-; Custom finish page
-!define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_TEXT "Launch H265 Transcoder"
-!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchApp"
+Var CommonAppDataPath
 
 ; Custom page for service configuration
 Page custom ServiceConfigPage ServiceConfigPageLeave
@@ -34,7 +29,9 @@ Function ServiceConfigPage
   ${NSD_CreateLabel} 0 70u 100% 12u "Service configuration file:"
   Pop $0
   
-  StrCpy $ConfigPath "$COMMONAPPDATA$\H265 Transcoder$\config.yaml"
+  ; Build config path - get Common AppData from registry
+  Call GetCommonAppDataPath
+  StrCpy $ConfigPath "$CommonAppDataPath\H265 Transcoder\config.yaml"
   ${NSD_CreateText} 0 85u 100% 12u $ConfigPath
   Pop $0
   ${NSD_Edit_SetReadOnly} $0 1
@@ -49,29 +46,40 @@ Function ServiceConfigPageLeave
   ${NSD_GetState} $InstallService $InstallService
 FunctionEnd
 
+; Helper function to get Common AppData path from registry (installer version)
+Function GetCommonAppDataPath
+  ReadRegStr $CommonAppDataPath HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" "Common AppData"
+  ${If} $CommonAppDataPath == ""
+    StrCpy $CommonAppDataPath "C:\ProgramData"
+  ${EndIf}
+FunctionEnd
+
 ; Main installation section
 Section "H265 Transcoder" SecMain
   SectionIn RO ; Required
   
   ; Install CLI service tools
   SetOutPath "$INSTDIR\service"
-  File "${BUILD_RESOURCES_DIR}\service\install-service.ps1"
-  File "${BUILD_RESOURCES_DIR}\service\uninstall-service.ps1"
-  File "${BUILD_RESOURCES_DIR}\service\config.example.yaml"
+  File "${PROJECT_DIR}\installer\service\install-service.ps1"
+  File "${PROJECT_DIR}\installer\service\uninstall-service.ps1"
+  File "${PROJECT_DIR}\installer\service\config.example.yaml"
   
   ; Create Start Menu shortcuts
   CreateDirectory "$SMPROGRAMS\H265 Transcoder"
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\H265 Transcoder.lnk" "$INSTDIR\H265 Transcoder.exe" "" "$INSTDIR\H265 Transcoder.exe" 0
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\Install Service.lnk" "powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\service\install-service.ps1"' "" "" SW_SHOWNORMAL "" "Install H265 Transcoder as a Windows service"
   CreateShortCut "$SMPROGRAMS\H265 Transcoder\Uninstall Service.lnk" "powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\service\uninstall-service.ps1"' "" "" SW_SHOWNORMAL "" "Remove H265 Transcoder Windows service"
-  CreateShortCut "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk" "notepad.exe" "$COMMONAPPDATA$\H265 Transcoder$\config.yaml" "" "" SW_SHOWNORMAL "" "Edit service configuration"
+  
+  ; Get Common AppData path and create config directory
+  Call GetCommonAppDataPath
+  CreateShortCut "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk" "notepad.exe" "$CommonAppDataPath\H265 Transcoder\config.yaml" "" "" SW_SHOWNORMAL "" "Edit service configuration"
   
   ; Create config directory
-  CreateDirectory "$COMMONAPPDATA$\H265 Transcoder"
+  CreateDirectory "$CommonAppDataPath\H265 Transcoder"
   
   ; Copy default config if not exists
-  IfFileExists "$COMMONAPPDATA$\H265 Transcoder$\config.yaml" +2 0
-    CopyFiles "$INSTDIR\service\config.example.yaml" "$COMMONAPPDATA$\H265 Transcoder$\config.yaml"
+  IfFileExists "$CommonAppDataPath\H265 Transcoder\config.yaml" +2 0
+    CopyFiles "$INSTDIR\service\config.example.yaml" "$CommonAppDataPath\H265 Transcoder\config.yaml"
 SectionEnd
 
 ; Post-install: optionally install service
@@ -83,30 +91,6 @@ Section "-PostInstall"
   ${EndIf}
 SectionEnd
 
-; Uninstaller additions
-Section "un.H265 Transcoder"
-  ; Stop and remove service if installed
-  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -File "$INSTDIR\service\uninstall-service.ps1"'
-  
-  ; Remove service files
-  RMDir /r "$INSTDIR\service"
-  
-  ; Remove Start Menu shortcuts
-  Delete "$SMPROGRAMS\H265 Transcoder\H265 Transcoder.lnk"
-  Delete "$SMPROGRAMS\H265 Transcoder\Install Service.lnk"
-  Delete "$SMPROGRAMS\H265 Transcoder\Uninstall Service.lnk"
-  Delete "$SMPROGRAMS\H265 Transcoder\Edit Service Config.lnk"
-  RMDir "$SMPROGRAMS\H265 Transcoder"
-  
-  ; Note: Config files are preserved at $COMMONAPPDATA$\H265 Transcoder
-  ; User can manually delete if desired
-SectionEnd
-
-Function LaunchApp
-  Exec '"$INSTDIR\H265 Transcoder.exe"'
-FunctionEnd
-
-; Initialize variables
-Function .onInit
-  StrCpy $InstallService 0
-FunctionEnd
+; Note: Variables are initialized to empty string by default in NSIS
+; $InstallService will be 0 (unchecked) when checkbox state is read
+; Note: Uninstaller is handled by electron-builder automatically

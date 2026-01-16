@@ -9,10 +9,12 @@ input: C:\Videos\Input
 output: C:\Videos\Output
 
 # Encoder options:
+#   auto    - Auto-detect best available encoder (recommended)
 #   x265    - Software encoder (CPU, works everywhere, slower)
 #   nvh265  - NVIDIA GPU encoder (fast, requires NVIDIA GPU)
 #   qsvh265 - Intel Quick Sync (fast, requires Intel GPU)
-encoder: x265
+#   vtenc   - Apple VideoToolbox (fast, macOS only)
+encoder: auto
 
 # Output format: mp4, mkv, mov
 # Recommended: mkv (supports more codecs, better streaming)

@@ -5,8 +5,16 @@ import icon from "../../resources/icon.png?asset";
 import * as path from "path";
 import * as fs from "fs";
 import * as chokidar from "chokidar";
-import { processVideoFile, ProcessCancelledError } from "./gstreamer/video-split";
+import {
+  processVideoFile,
+  ProcessCancelledError,
+} from "./gstreamer/video-split";
 import { BatchProcessConfig, ProcessStatus } from "./types/types";
+import {
+  detectAvailableEncoders,
+  EncoderDetectionResult,
+} from "../core/utils/encoder-detection";
+import { RuntimeContext } from "../core/utils/gstreamer-path";
 
 // Watch mode state
 let fileWatcher: chokidar.FSWatcher | null = null;
@@ -52,32 +60,32 @@ const VIDEO_EXTENSIONS = new Set([
 function isVideoFile(filePath: string): boolean {
   const filename = path.basename(filePath).toLowerCase();
   const ext = path.extname(filename).toLowerCase();
-  
+
   // Exclude TypeScript definition files (.d.ts)
-  if (filename.endsWith('.d.ts')) {
+  if (filename.endsWith(".d.ts")) {
     return false;
   }
-  
+
   // Exclude paths containing common code directories
-  const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+  const normalizedPath = filePath.toLowerCase().replace(/\\/g, "/");
   const excludedDirs = [
-    '/node_modules/',
-    '/.git/',
-    '/dist/',
-    '/build/',
-    '/out/',
-    '/.next/',
-    '/.nuxt/',
-    '/vendor/',
-    '/__pycache__/',
-    '/.venv/',
-    '/venv/',
+    "/node_modules/",
+    "/.git/",
+    "/dist/",
+    "/build/",
+    "/out/",
+    "/.next/",
+    "/.nuxt/",
+    "/vendor/",
+    "/__pycache__/",
+    "/.venv/",
+    "/venv/",
   ];
-  
-  if (excludedDirs.some(dir => normalizedPath.includes(dir))) {
+
+  if (excludedDirs.some((dir) => normalizedPath.includes(dir))) {
     return false;
   }
-  
+
   return VIDEO_EXTENSIONS.has(ext);
 }
 
@@ -151,7 +159,7 @@ function createWindow(): BrowserWindow {
 
   const mainWindow = new BrowserWindow({
     width: 900,
-    height: 750,
+    height: 700,
     show: false,
     frame: false,
     icon: windowIcon,
@@ -256,6 +264,42 @@ function setupIpcHandlers(): void {
     return app.getVersion();
   });
 
+  // Encoder detection - detect available hardware encoders
+  ipcMain.handle(
+    "video:detect-encoders",
+    async (): Promise<EncoderDetectionResult> => {
+      const context: RuntimeContext = {
+        isPackaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath || app.getAppPath(),
+      };
+
+      try {
+        const result = await detectAvailableEncoders(context);
+        return result;
+      } catch (error) {
+        console.error("[Encoder Detection] Error:", error);
+        // Return software-only fallback on error
+        return {
+          encoders: [
+            {
+              id: "x265",
+              name: "Software (x265)",
+              description: "CPU-based encoding (slower, always available)",
+              gstreamerElement: "x265enc",
+              available: true,
+              recommended: true,
+              priority: 10,
+              platform: "all",
+            },
+          ],
+          recommended: "x265",
+          hasHardwareEncoder: false,
+        };
+      }
+    }
+  );
+
   // Cancel batch processing
   ipcMain.handle("video:cancel-batch-process", () => {
     if (batchAbortController) {
@@ -344,6 +388,7 @@ function setupIpcHandlers(): void {
         let skippedFiles = 0;
         let totalBytesProcessed = 0; // Track total bytes processed across all files
         const errors: Array<{ file: string; error: string }> = []; // Track all errors
+        const batchStartTime = Date.now(); // Track start time for throughput calculation
 
         // Send initial status
         sendProgressUpdate({
@@ -356,13 +401,18 @@ function setupIpcHandlers(): void {
           chunkProgress: 0,
           overallProgress: 0,
           status: "processing",
+          processedBytes: 0,
+          totalBytes,
+          throughputBps: 0,
         });
 
         // Process each file sequentially
         for (let i = 0; i < files.length; i++) {
           // Check if cancelled before processing next file
           if (isBatchCancelled) {
-            console.log(`[Batch Process] Cancelled after ${processedFiles} file(s)`);
+            console.log(
+              `[Batch Process] Cancelled after ${processedFiles} file(s)`
+            );
             break;
           }
 
@@ -370,6 +420,11 @@ function setupIpcHandlers(): void {
           const filePath = file.path;
           const fileName = file.relativePath || file.name; // Show relative path if available
           const fileSize = file.size;
+
+          // Calculate current throughput
+          const elapsedSeconds = (Date.now() - batchStartTime) / 1000;
+          const currentThroughput =
+            elapsedSeconds > 0 ? totalBytesProcessed / elapsedSeconds : 0;
 
           sendProgressUpdate({
             currentFile: fileName,
@@ -383,6 +438,9 @@ function setupIpcHandlers(): void {
               (totalBytesProcessed / totalBytes) * 100
             ),
             status: "processing",
+            processedBytes: totalBytesProcessed,
+            totalBytes,
+            throughputBps: currentThroughput,
           });
 
           try {
@@ -406,70 +464,46 @@ function setupIpcHandlers(): void {
                   (totalProcessedBytes / totalBytes) * 100
                 );
 
-                console.log(
-                  `[Progress Update] File: ${progressStatus.fileProgress}%, ` +
-                    `Chunk: ${progressStatus.currentChunk}/${progressStatus.totalChunks} (${progressStatus.chunkProgress}%), ` +
-                    `Overall: ${overallProgress}% ` +
-                    `(${(totalProcessedBytes / (1024 * 1024 * 1024)).toFixed(2)}GB / ${(totalBytes / (1024 * 1024 * 1024)).toFixed(2)}GB)`
-                );
+                // Note: Detailed progress is logged by video-split.ts
+                // Only log batch-level progress here when it changes significantly
 
-                // Calculate overall ETA based on bytes and processing speed
+                // Calculate overall ETA using industry standard formula:
+                // ETA = (remainingBytes / processedBytes) * elapsedTime
+                // This is the same formula used by FFmpeg, HandBrake, rsync, wget, etc.
                 let overallEta: number | undefined;
+                const progressElapsed = (Date.now() - batchStartTime) / 1000;
 
-                if (
-                  progressStatus.processingSpeed &&
-                  progressStatus.processingSpeed > 0 &&
+                // Wait for minimum data before calculating (5 seconds or some bytes processed)
+                if (totalProcessedBytes > 0 && progressElapsed > 5) {
+                  const remainingBytes = totalBytes - totalProcessedBytes;
+                  // Industry standard: ETA = remaining * (elapsed / completed)
+                  overallEta = Math.round(
+                    (remainingBytes / totalProcessedBytes) * progressElapsed
+                  );
+                } else if (
+                  progressStatus.fileEta !== undefined &&
+                  progressStatus.fileEta > 0 &&
                   fileSize > 0
                 ) {
-                  // Calculate bytes per second from current file's processing
-                  // Convert video speed to bytes/second: (fileSize / fileDuration) * processingSpeed
-                  // But we need fileDuration - let's estimate from fileEta
-                  if (
-                    progressStatus.fileEta !== undefined &&
-                    progressStatus.fileEta > 0
-                  ) {
-                    // Estimate bytes/second: remaining bytes / remaining time
-                    const currentFileRemainingBytes =
-                      fileSize - currentFileProcessedBytes;
-                    const bytesPerSecond =
-                      currentFileRemainingBytes / progressStatus.fileEta;
-
-                    // Calculate remaining bytes across all files
-                    const remainingBytes = totalBytes - totalProcessedBytes;
-
-                    if (bytesPerSecond > 0 && remainingBytes > 0) {
-                      overallEta = Math.round(remainingBytes / bytesPerSecond);
-                    }
-                  }
-                } else if (progressStatus.fileEta !== undefined) {
-                  // Fallback: estimate based on remaining files and current file ETA
+                  // Early fallback: scale current file ETA by total/current file size ratio
                   const remainingBytes = totalBytes - totalProcessedBytes;
                   const currentFileRemainingBytes =
                     fileSize - currentFileProcessedBytes;
-
-                  if (
-                    currentFileRemainingBytes > 0 &&
-                    progressStatus.fileEta > 0
-                  ) {
-                    // Estimate bytes/second from current file
-                    const bytesPerSecond =
-                      currentFileRemainingBytes / progressStatus.fileEta;
-
-                    // Estimate remaining bytes in other files
-                    const remainingFilesBytes =
-                      remainingBytes - currentFileRemainingBytes;
-
-                    if (bytesPerSecond > 0 && remainingFilesBytes > 0) {
-                      // Estimate time for remaining files
-                      const remainingFilesTime = Math.round(
-                        remainingFilesBytes / bytesPerSecond
-                      );
-                      overallEta = progressStatus.fileEta + remainingFilesTime;
-                    } else {
-                      overallEta = progressStatus.fileEta;
-                    }
+                  if (currentFileRemainingBytes > 0) {
+                    overallEta = Math.round(
+                      progressStatus.fileEta *
+                        (remainingBytes / currentFileRemainingBytes)
+                    );
                   }
                 }
+
+                // Calculate throughput based on total bytes processed including current file progress
+                const progressElapsedSeconds =
+                  (Date.now() - batchStartTime) / 1000;
+                const progressThroughput =
+                  progressElapsedSeconds > 0
+                    ? totalProcessedBytes / progressElapsedSeconds
+                    : 0;
 
                 sendProgressUpdate({
                   currentFile: fileName,
@@ -485,6 +519,9 @@ function setupIpcHandlers(): void {
                   chunkEta: progressStatus.chunkEta,
                   fileEta: progressStatus.fileEta,
                   processingSpeed: progressStatus.processingSpeed,
+                  processedBytes: totalProcessedBytes,
+                  totalBytes,
+                  throughputBps: progressThroughput,
                 });
               },
               batchAbortController?.signal
@@ -497,7 +534,9 @@ function setupIpcHandlers(): void {
           } catch (error) {
             // Check if this was a cancellation
             if (error instanceof ProcessCancelledError || isBatchCancelled) {
-              console.log(`[Batch Process] Processing cancelled during: ${fileName}`);
+              console.log(
+                `[Batch Process] Processing cancelled during: ${fileName}`
+              );
               isBatchCancelled = true;
               break;
             }
@@ -518,6 +557,12 @@ function setupIpcHandlers(): void {
               `Skipping file due to error: ${fileName} - ${errorMessage}`
             );
 
+            const errorElapsedSeconds = (Date.now() - batchStartTime) / 1000;
+            const errorThroughput =
+              errorElapsedSeconds > 0
+                ? totalBytesProcessed / errorElapsedSeconds
+                : 0;
+
             sendProgressUpdate({
               currentFile: fileName,
               currentFileIndex: i + 1,
@@ -531,6 +576,9 @@ function setupIpcHandlers(): void {
               ),
               status: "processing",
               error: `Failed: ${errorMessage}`,
+              processedBytes: totalBytesProcessed,
+              totalBytes,
+              throughputBps: errorThroughput,
             });
 
             // Continue to next file instead of breaking
@@ -540,8 +588,16 @@ function setupIpcHandlers(): void {
 
         // Check if cancelled
         if (isBatchCancelled) {
-          console.log(`[Batch Process] Cancelled. Processed: ${processedFiles}, Skipped: ${skippedFiles}`);
-          
+          console.log(
+            `[Batch Process] Cancelled. Processed: ${processedFiles}, Skipped: ${skippedFiles}`
+          );
+
+          const cancelledElapsedSeconds = (Date.now() - batchStartTime) / 1000;
+          const cancelledThroughput =
+            cancelledElapsedSeconds > 0
+              ? totalBytesProcessed / cancelledElapsedSeconds
+              : 0;
+
           sendProgressUpdate({
             currentFile: "",
             currentFileIndex: processedFiles,
@@ -550,16 +606,27 @@ function setupIpcHandlers(): void {
             totalChunks: 0,
             fileProgress: 0,
             chunkProgress: 0,
-            overallProgress: Math.round((totalBytesProcessed / totalBytes) * 100),
+            overallProgress: Math.round(
+              (totalBytesProcessed / totalBytes) * 100
+            ),
             status: "idle",
             error: `Cancelled after processing ${processedFiles} file(s)`,
+            processedBytes: totalBytesProcessed,
+            totalBytes,
+            throughputBps: cancelledThroughput,
           });
 
           // Clean up
           batchAbortController = null;
           isBatchCancelled = false;
-          
-          return { success: false, cancelled: true, processedFiles, skippedFiles, errors };
+
+          return {
+            success: false,
+            cancelled: true,
+            processedFiles,
+            skippedFiles,
+            errors,
+          };
         }
 
         // Log summary
@@ -577,6 +644,12 @@ function setupIpcHandlers(): void {
             ? `Completed with ${skippedFiles} error(s)`
             : undefined;
 
+        const completionElapsedSeconds = (Date.now() - batchStartTime) / 1000;
+        const completionThroughput =
+          completionElapsedSeconds > 0
+            ? totalBytes / completionElapsedSeconds
+            : 0;
+
         sendProgressUpdate({
           currentFile: "",
           currentFileIndex: totalFiles,
@@ -588,6 +661,9 @@ function setupIpcHandlers(): void {
           overallProgress: 100,
           status: "completed",
           error: completionMessage,
+          processedBytes: totalBytes,
+          totalBytes,
+          throughputBps: completionThroughput,
         });
 
         // Clean up
@@ -611,6 +687,9 @@ function setupIpcHandlers(): void {
           overallProgress: 0,
           status: "error",
           error: error instanceof Error ? error.message : String(error),
+          processedBytes: 0,
+          totalBytes: 0,
+          throughputBps: 0,
         });
         throw error;
       }
@@ -656,11 +735,11 @@ function setupIpcHandlers(): void {
             "**/*.tmp",
             "**/*.crdownload",
             "**/node_modules/**", // Ignore node_modules
-            "**/dist/**",     // Ignore dist directories
-            "**/build/**",    // Ignore build directories
-            "**/out/**",      // Ignore out directories
-            "**/.git/**",     // Ignore git directories
-            "**/*.d.ts",      // Ignore TypeScript definition files
+            "**/dist/**", // Ignore dist directories
+            "**/build/**", // Ignore build directories
+            "**/out/**", // Ignore out directories
+            "**/.git/**", // Ignore git directories
+            "**/*.d.ts", // Ignore TypeScript definition files
           ],
         });
 
@@ -669,12 +748,12 @@ function setupIpcHandlers(): void {
             if (isVideoFile(filePath)) {
               const fileName = path.basename(filePath);
               console.log(`[Watch Mode] New file detected: ${fileName}`);
-              
+
               // Add to queue if not already present
-              if (!watchQueue.some(f => f.path === filePath)) {
+              if (!watchQueue.some((f) => f.path === filePath)) {
                 watchQueue.push({ path: filePath, name: fileName });
                 watchStats.filesQueued++;
-                
+
                 // Notify renderer
                 sendWatchStatus();
                 if (mainWindow && !mainWindow.isDestroyed()) {
@@ -683,7 +762,7 @@ function setupIpcHandlers(): void {
                     name: fileName,
                   });
                 }
-                
+
                 // Start processing if not already
                 processWatchQueue();
               }
@@ -696,7 +775,8 @@ function setupIpcHandlers(): void {
         sendWatchStatus();
         return { success: true };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         console.error("[Watch Mode] Failed to start:", errorMessage);
         throw error;
       }
@@ -737,7 +817,7 @@ async function processWatchQueue(): Promise<void> {
 
   while (watchQueue.length > 0 && watchConfig) {
     const file = watchQueue[0];
-    
+
     try {
       console.log(`[Watch Mode] Processing: ${file.name}`);
 
@@ -780,7 +860,8 @@ async function processWatchQueue(): Promise<void> {
       console.log(`[Watch Mode] Completed: ${file.name}`);
     } catch (error) {
       watchStats.filesFailed++;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       console.error(`[Watch Mode] Failed: ${file.name} - ${errorMessage}`);
     }
 

@@ -542,6 +542,9 @@ function extractMsi(msiPath, extractDir) {
         );
         if (fs.existsSync(gstLaunchPath)) {
           console.log(`\n✓ Successfully extracted to ${extractDir}`);
+          
+          // Verify essential tools are present (gst-discoverer is needed for accurate duration detection)
+          verifyAndCopyEssentialTools(extractDir);
           return;
         }
       }
@@ -613,6 +616,85 @@ function copyDirectory(src, dest) {
     } else {
       fs.copyFileSync(srcPath, destPath);
     }
+  }
+}
+
+/**
+ * Verify essential GStreamer tools are present and copy from system if needed.
+ * gst-discoverer-1.0 is critical for accurate video duration detection.
+ */
+function verifyAndCopyEssentialTools(extractDir) {
+  const platform = process.platform;
+  const exe = platform === "win32" ? ".exe" : "";
+  
+  // Essential tools that should be present
+  const essentialTools = [
+    `gst-launch-1.0${exe}`,
+    `gst-discoverer-1.0${exe}`,  // Critical for duration detection
+    `gst-inspect-1.0${exe}`,
+  ];
+  
+  const binDir = path.join(extractDir, "bin");
+  const missingTools = [];
+  
+  for (const tool of essentialTools) {
+    const toolPath = path.join(binDir, tool);
+    if (!fs.existsSync(toolPath)) {
+      missingTools.push(tool);
+    }
+  }
+  
+  if (missingTools.length === 0) {
+    console.log("✓ All essential GStreamer tools present");
+    return;
+  }
+  
+  console.log(`\n⚠️  Missing essential tools: ${missingTools.join(", ")}`);
+  console.log("Attempting to copy from system GStreamer installation...");
+  
+  // Try to find system GStreamer installation
+  const systemPaths = platform === "win32" ? [
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "gstreamer", "1.0", "msvc_x86_64", "bin"),
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "gstreamer", "1.0", "msvc_x86_64", "bin"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "GStreamer", "1.0", "msvc_x86_64", "bin"),
+    "C:\\gstreamer\\1.0\\msvc_x86_64\\bin",
+  ] : [
+    "/usr/bin",
+    "/usr/local/bin",
+    "/opt/gstreamer/bin",
+  ];
+  
+  let copiedCount = 0;
+  for (const tool of missingTools) {
+    for (const systemPath of systemPaths) {
+      const sourcePath = path.join(systemPath, tool);
+      if (fs.existsSync(sourcePath)) {
+        const destPath = path.join(binDir, tool);
+        try {
+          fs.copyFileSync(sourcePath, destPath);
+          console.log(`  ✓ Copied ${tool} from ${systemPath}`);
+          copiedCount++;
+          break;
+        } catch (e) {
+          console.log(`  ✗ Failed to copy ${tool}: ${e.message}`);
+        }
+      }
+    }
+  }
+  
+  if (copiedCount < missingTools.length) {
+    const stillMissing = missingTools.filter(tool => !fs.existsSync(path.join(binDir, tool)));
+    if (stillMissing.length > 0) {
+      console.log(`\n⚠️  Could not find: ${stillMissing.join(", ")}`);
+      console.log("These tools are optional but recommended for best performance.");
+      if (stillMissing.includes(`gst-discoverer-1.0${exe}`)) {
+        console.log("\nNote: gst-discoverer-1.0 is needed for accurate video duration detection.");
+        console.log("Without it, progress estimates will be less accurate.");
+        console.log("To fix: Install GStreamer from https://gstreamer.freedesktop.org/download/");
+      }
+    }
+  } else {
+    console.log("✓ All missing tools copied successfully");
   }
 }
 
@@ -1024,6 +1106,9 @@ async function setupGStreamer(targetPlatform) {
   } else {
     console.log("GStreamer already extracted.");
   }
+
+  // Always verify essential tools are present (may need to copy from system)
+  verifyAndCopyEssentialTools(extractDir);
 
   console.log("\nGStreamer setup complete!");
   console.log(`Location: ${extractDir}`);

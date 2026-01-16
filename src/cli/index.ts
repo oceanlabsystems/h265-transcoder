@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { ProcessingQueue } from './queue';
 import { createCliContext, RuntimeContext } from '../core/utils/gstreamer-path';
+import { detectAvailableEncoders, EncoderType } from '../core/utils/encoder-detection';
 import { WatchConfig } from '../core/types/types';
 
 // Supported video file extensions
@@ -105,7 +106,7 @@ function formatBytes(bytes: number): string {
 interface CliConfig {
   input: string;
   output: string;
-  encoder: 'x265' | 'nvh265' | 'qsvh265';
+  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc' | 'auto';
   chunkDuration: string;
   format: 'mp4' | 'mkv' | 'mov';
   bitrate?: string;
@@ -129,7 +130,7 @@ program
   .option('-o, --output <dir>', 'Output directory for processed files')
   .option('-c, --config <file>', 'Path to YAML config file')
   .option('-w, --watch', 'Continuous monitoring mode (watch for new files)', false)
-  .option('--encoder <type>', 'Encoder: x265, nvh265, qsvh265', 'x265')
+  .option('--encoder <type>', 'Encoder: auto, x265, nvh265, qsvh265, vtenc (auto detects best)', 'auto')
   .option('--chunk-duration <minutes>', 'Chunk duration in minutes', '60')
   .option('--format <type>', 'Output format: mp4, mkv, mov', 'mkv')
   .option('--bitrate <kbps>', 'Target bitrate in kbps (optional)')
@@ -226,13 +227,34 @@ async function main() {
   // Initialize GStreamer path resolver
   const context: RuntimeContext = createCliContext(finalConfig.gstreamerPath);
 
+  // Auto-detect encoder if set to 'auto'
+  let selectedEncoder: EncoderType = finalConfig.encoder === 'auto' ? 'x265' : finalConfig.encoder as EncoderType;
+  
+  if (finalConfig.encoder === 'auto') {
+    console.log('[Encoder] Auto-detecting available encoders...');
+    try {
+      const detection = await detectAvailableEncoders(context);
+      selectedEncoder = detection.recommended;
+      
+      if (detection.hasHardwareEncoder) {
+        const hwEncoder = detection.encoders.find(e => e.recommended && e.id !== 'x265');
+        console.log(`[Encoder] Hardware encoder detected: ${hwEncoder?.name || selectedEncoder}`);
+      } else {
+        console.log('[Encoder] No hardware encoder found, using software x265');
+      }
+    } catch (error) {
+      console.warn('[Encoder] Detection failed, defaulting to x265:', error);
+      selectedEncoder = 'x265';
+    }
+  }
+
   // Create watch config
   const watchConfig: WatchConfig = {
     inputDirectory: path.resolve(finalConfig.input),
     outputDirectory: path.resolve(finalConfig.output),
     chunkDurationMinutes: parseInt(finalConfig.chunkDuration, 10),
     outputFormat: finalConfig.format as 'mp4' | 'mkv' | 'mov',
-    encoder: finalConfig.encoder as 'x265' | 'nvh265' | 'qsvh265',
+    encoder: selectedEncoder,
     bitrate: finalConfig.bitrate ? parseInt(finalConfig.bitrate, 10) : undefined,
     speedPreset: finalConfig.speedPreset as any,
     watchMode: finalConfig.watch,

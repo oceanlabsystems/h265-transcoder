@@ -24,13 +24,55 @@ function formatTime(seconds: number): string {
 }
 
 /**
+ * Fallback: Try to get video duration using ffprobe (if available)
+ */
+function tryFfprobeDuration(inputPath: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    // Try ffprobe first as it's more reliable
+    const ffprobeArgs = [
+      "-v",
+      "quiet",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
+      inputPath,
+    ];
+
+    const ffprobe = spawn("ffprobe", ffprobeArgs);
+    let output = "";
+
+    ffprobe.stdout.on("data", (data) => {
+      output += data.toString();
+    });
+
+    ffprobe.on("exit", (code) => {
+      if (code === 0) {
+        const duration = parseFloat(output.trim());
+        if (!isNaN(duration) && duration > 0) {
+          console.log(`[Duration] Got duration from ffprobe: ${duration}s`);
+          resolve(duration);
+          return;
+        }
+      }
+      resolve(null);
+    });
+
+    ffprobe.on("error", () => {
+      resolve(null); // ffprobe not available
+    });
+  });
+}
+
+/**
  * Get video file duration in seconds using GStreamer
+ * Falls back to ffprobe if gst-discoverer is not available
  */
 export function getVideoDurationWithContext(
   inputPath: string,
   context: RuntimeContext
 ): Promise<number> {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     // Convert path to file:// URI format for GStreamer
     let fileUri = inputPath.replace(/\\/g, "/");
     if (/^[A-Za-z]:/.test(fileUri)) {
@@ -50,6 +92,34 @@ export function getVideoDurationWithContext(
       /gst-launch-1\.0(\.exe)?$/,
       "gst-discoverer-1.0$1"
     );
+
+    // Check if gst-discoverer exists
+    const discovererExists = fs.existsSync(discovererPath);
+    if (!discovererExists) {
+      console.warn(
+        `[Duration] gst-discoverer-1.0 not found at: ${discovererPath}`
+      );
+      console.warn(
+        `[Duration] Trying ffprobe fallback... (install full GStreamer for best accuracy)`
+      );
+
+      // Try ffprobe fallback
+      const ffprobeDuration = await tryFfprobeDuration(inputPath);
+      if (ffprobeDuration !== null) {
+        resolve(ffprobeDuration);
+        return;
+      }
+
+      reject(
+        new Error(
+          `gst-discoverer-1.0 not found and ffprobe unavailable. ` +
+            `Install GStreamer from https://gstreamer.freedesktop.org/download/ ` +
+            `or run: node scripts/download-gstreamer.js`
+        )
+      );
+      return;
+    }
+
     const discoverer = spawn(discovererPath, [fileUri], { env: processEnv });
 
     let output = "";
@@ -61,7 +131,7 @@ export function getVideoDurationWithContext(
       output += data.toString();
     });
 
-    discoverer.on("exit", (code) => {
+    discoverer.on("exit", async (code) => {
       if (code === 0) {
         // Log full output for debugging
         console.log(`[Duration Discovery] Output: ${output.substring(0, 500)}`);
@@ -114,6 +184,16 @@ export function getVideoDurationWithContext(
           );
         }
       } else {
+        // gst-discoverer failed - try ffprobe fallback
+        console.warn(
+          `[Duration] gst-discoverer failed with code ${code}, trying ffprobe...`
+        );
+        const ffprobeDuration = await tryFfprobeDuration(inputPath);
+        if (ffprobeDuration !== null) {
+          resolve(ffprobeDuration);
+          return;
+        }
+
         reject(
           new Error(
             `GStreamer discoverer exited with code ${code}. Output: ${output.substring(0, 200)}`
@@ -122,7 +202,14 @@ export function getVideoDurationWithContext(
       }
     });
 
-    discoverer.on("error", (error) => {
+    discoverer.on("error", async (error) => {
+      // gst-discoverer spawn failed - try ffprobe fallback
+      console.warn(`[Duration] gst-discoverer error: ${error.message}`);
+      const ffprobeDuration = await tryFfprobeDuration(inputPath);
+      if (ffprobeDuration !== null) {
+        resolve(ffprobeDuration);
+        return;
+      }
       reject(error);
     });
   });
@@ -177,6 +264,7 @@ export function processVideoFileWithContext(
     let fileDuration = 0;
     let totalChunks = 0;
     let inputFileSize = 0;
+    let durationIsEstimated = false;
 
     // Get file size for validation
     try {
@@ -202,6 +290,7 @@ export function processVideoFileWithContext(
         const estimatedDuration =
           (inputFileSize * 8) / (estimatedBitrateMbps * 1000000); // seconds
         fileDuration = estimatedDuration;
+        durationIsEstimated = true;
         console.log(
           `[Video Info] Estimated duration: ${Math.round(fileDuration)}s (${Math.round(fileDuration / 60)} minutes)`
         );
@@ -211,10 +300,12 @@ export function processVideoFileWithContext(
       console.log(
         `[Video Info] Duration: ${fileDuration}s (${Math.round(fileDuration / 60)} min), ` +
           `File size: ${(inputFileSize / (1024 * 1024 * 1024)).toFixed(2)}GB, ` +
-          `Will create ${totalChunks} chunk(s)`
+          `Will create ${totalChunks} chunk(s)` +
+          (durationIsEstimated ? " (estimated)" : "")
       );
     } catch (error) {
       console.warn(`[Video Info] Could not get duration: ${error}`);
+      durationIsEstimated = true;
       // If we have file size, estimate duration
       if (inputFileSize > 0) {
         const estimatedBitrateMbps = 20; // Conservative estimate
@@ -247,7 +338,10 @@ export function processVideoFileWithContext(
       encoder = "nvh265enc"; // NVIDIA hardware encoder
       useHardwareFormat = true;
     } else if (config.encoder === "qsvh265") {
-      encoder = "qsvh265enc";
+      encoder = "qsvh265enc"; // Intel Quick Sync encoder
+      useHardwareFormat = true;
+    } else if (config.encoder === "vtenc") {
+      encoder = "vtenc_h265"; // Apple VideoToolbox encoder (macOS)
       useHardwareFormat = true;
     } else {
       encoder = "x265enc"; // Software encoder
@@ -264,11 +358,34 @@ export function processVideoFileWithContext(
       fileUri = "file://" + fileUri;
     }
 
+    // Build x265enc options for reduced buffering and better progress tracking
+    // key-int-max: Maximum keyframe interval (forces more frequent output)
+    // rc-lookahead: Reduced lookahead frames (default is 20-40, we use 10 for faster output)
+    // bframes: Reduce B-frames for faster encoding throughput
+    const x265Options = [
+      config.speedPreset
+        ? `speed-preset=${config.speedPreset}`
+        : "speed-preset=medium",
+      "key-int-max=120", // Force keyframe every 120 frames (~4 sec at 30fps)
+      'option-string="rc-lookahead=10:bframes=3"', // Reduce lookahead buffer, limit B-frames
+    ];
+
     const args = [
       "uridecodebin",
       `uri=${fileUri}`,
       "!",
       "video/x-raw", // Filter to video streams only
+      "!",
+      // Add a queue to prevent upstream stalls and enable parallel processing
+      "queue",
+      "max-size-buffers=100",
+      "max-size-time=2000000000", // 2 seconds buffer
+      "!",
+      // Progress reporting element - outputs position/duration for accurate progress tracking
+      // This reports based on INPUT position, not output bytes (like pro transcoding apps)
+      "progressreport",
+      "update-freq=1", // Report every 1 second
+      "silent=false", // Output progress messages
       "!",
       "videoconvert",
       "!",
@@ -278,17 +395,14 @@ export function processVideoFileWithContext(
       "!",
       encoder,
       ...(config.bitrate ? [`bitrate=${config.bitrate}`] : []),
-      ...(encoder === "x265enc"
-        ? [
-            config.speedPreset
-              ? `speed-preset=${config.speedPreset}`
-              : "speed-preset=medium",
-          ]
-        : encoder === "qsvh265enc"
-          ? []
-          : []),
+      ...(encoder === "x265enc" ? x265Options : []),
+      ...(encoder === "qsvh265enc" ? [] : []),
       "!",
       "h265parse",
+      "!",
+      // Add queue before muxer to prevent encoder stalls
+      "queue",
+      "max-size-buffers=50",
       "!",
       "splitmuxsink",
       `location="${outputBaseName.replace(/\\/g, "/")}_%02d.${config.outputFormat}"`,
@@ -353,320 +467,288 @@ export function processVideoFileWithContext(
     let progressUpdateInterval: ReturnType<typeof setInterval> | null = null;
     const startTime = Date.now();
 
-    // Byte-based progress tracking
+    // INPUT-BASED progress tracking (like professional transcoding apps)
+    // progressreport element gives us exact position in the input stream
+    let currentPositionSeconds = 0; // Current position in input stream (from progressreport)
+
+    // Secondary: Output byte tracking for verification
     let lastTotalOutputSize = 0;
     let lastSizeCheckTime = startTime;
     let bytesPerSecond = 0;
-    let processedBytes = 0;
+
+    // ETA and speed smoothing to prevent wild jumps
+    let smoothedEta: number | undefined;
+    let smoothedSpeed: number | undefined;
+    let etaStabilityCount = 0;
+    const MIN_PROGRESS_FOR_ETA = 3; // Need 3% progress before showing ETA
+    const MIN_TIME_FOR_ETA = 10; // Need 10 seconds of data before showing ETA
+
+    // Track values for brief glitch protection
+    let lastKnownChunkCount = 0;
+    let lastKnownFileProgress = 0;
+
+    // Debug logging flag
+    const DEBUG_PROGRESS = false;
 
     // Helper function to send progress updates
+    // This uses INPUT-BASED progress tracking (like professional transcoding apps)
     const sendProgressUpdate = () => {
       if (!onProgress) return;
 
       const elapsed = (Date.now() - startTime) / 1000;
 
+      // ========================================
+      // 1. CALCULATE FILE PROGRESS FROM INPUT POSITION
+      // ========================================
+      // This is the core improvement: progress based on input stream position,
+      // not output bytes or compression ratio guessing
+      let fileProgress = 0;
+
+      if (fileDuration > 0 && currentPositionSeconds > 0) {
+        // PRIMARY: Use input position from progressreport (most accurate)
+        // This is how professional apps like HandBrake, FFmpeg progress work
+        fileProgress = Math.min(
+          99,
+          Math.round((currentPositionSeconds / fileDuration) * 100)
+        );
+      } else if (fileDuration > 0 && elapsed > 0) {
+        // FALLBACK: If no position yet, show 0% or minimal progress
+        // Don't guess - wait for real data
+        fileProgress = 0;
+      }
+
+      // Ensure progress never goes backward
+      if (fileProgress < lastKnownFileProgress) {
+        fileProgress = lastKnownFileProgress;
+      } else {
+        lastKnownFileProgress = fileProgress;
+      }
+
+      // ========================================
+      // 2. COUNT OUTPUT CHUNKS (for chunk progress display)
+      // ========================================
       let chunkCount = 0;
       let totalOutputSize = 0;
 
       try {
-        const firstChunkFileName = `${inputFileName}_01.${config.outputFormat}`;
-        const firstChunkPath = path.join(
-          normalizedOutputDir,
-          firstChunkFileName
-        );
+        let chunkNum = 0;
+        while (chunkNum <= 100) {
+          const chunkFileName = `${inputFileName}_${String(chunkNum).padStart(2, "0")}.${config.outputFormat}`;
+          const chunkPath = path.join(normalizedOutputDir, chunkFileName);
 
-        if (fs.existsSync(firstChunkPath)) {
-          try {
-            const stats = fs.statSync(firstChunkPath);
-            const chunkSize = stats.size;
-            totalOutputSize = chunkSize;
-
-            if (
-              chunkSize > 0 ||
-              config.outputFormat === "mp4" ||
-              config.outputFormat === "mov"
-            ) {
-              chunkCount = 1;
-            }
-          } catch (e) {
-            // Ignore errors reading file stats
-          }
-        }
-
-        if (chunkCount > 0) {
-          let nextChunkNum = 2;
-          while (nextChunkNum <= 100) {
-            const chunkFileName = `${inputFileName}_${String(nextChunkNum).padStart(2, "0")}.${config.outputFormat}`;
-            const chunkPath = path.join(normalizedOutputDir, chunkFileName);
-            if (fs.existsSync(chunkPath)) {
-              try {
-                const stats = fs.statSync(chunkPath);
-                const chunkSize = stats.size;
-                totalOutputSize += chunkSize;
-
-                if (
-                  chunkSize > 0 ||
-                  config.outputFormat === "mp4" ||
-                  config.outputFormat === "mov"
-                ) {
-                  chunkCount++;
-                  nextChunkNum++;
-                } else {
-                  break;
-                }
-              } catch (e) {
-                break;
+          if (fs.existsSync(chunkPath)) {
+            try {
+              const stats = fs.statSync(chunkPath);
+              totalOutputSize += stats.size;
+              if (
+                stats.size > 0 ||
+                config.outputFormat === "mp4" ||
+                config.outputFormat === "mov"
+              ) {
+                chunkCount++;
               }
-            } else {
-              break;
+              chunkNum++;
+            } catch {
+              chunkNum++;
             }
+          } else {
+            break;
           }
         }
       } catch (e) {
-        console.warn(`[Progress] Error checking chunks: ${e}`);
+        if (DEBUG_PROGRESS)
+          console.warn(`[Progress] Error checking chunks: ${e}`);
       }
 
+      // Update current chunk tracking
+      if (chunkCount > lastKnownChunkCount) {
+        lastKnownChunkCount = chunkCount;
+      }
       if (chunkCount > 0) {
         currentChunk = chunkCount;
-      } else if (fileDuration > 0) {
+      } else if (currentPositionSeconds > 0) {
         currentChunk = 1;
       }
 
+      // Track output throughput (secondary metric)
       const now = Date.now();
       const timeSinceLastCheck = (now - lastSizeCheckTime) / 1000;
-
       if (totalOutputSize > 0 && timeSinceLastCheck >= 1) {
         const bytesGrowth = totalOutputSize - lastTotalOutputSize;
-        if (bytesGrowth > 0 && timeSinceLastCheck > 0) {
+        if (bytesGrowth > 0) {
           const instantSpeed = bytesGrowth / timeSinceLastCheck;
-          if (bytesPerSecond > 0) {
-            bytesPerSecond = bytesPerSecond * 0.7 + instantSpeed * 0.3;
-          } else {
-            bytesPerSecond = instantSpeed;
-          }
+          bytesPerSecond =
+            bytesPerSecond > 0
+              ? bytesPerSecond * 0.7 + instantSpeed * 0.3
+              : instantSpeed;
         }
-
-        processedBytes = totalOutputSize;
-
         lastTotalOutputSize = totalOutputSize;
         lastSizeCheckTime = now;
-      } else if (totalOutputSize > 0 && bytesPerSecond === 0 && elapsed > 2) {
-        bytesPerSecond = totalOutputSize / elapsed;
-        processedBytes = totalOutputSize;
       }
 
-      if (chunkCount > totalChunks && fileDuration === 0) {
-        totalChunks = chunkCount;
-      }
-
-      let fileProgress = 0;
-
-      if (inputFileSize > 0 && totalOutputSize > 0) {
-        const byteRatio = Math.min(0.99, totalOutputSize / inputFileSize);
-        fileProgress = Math.round(byteRatio * 100);
-        processedBytes = totalOutputSize;
-      } else if (fileDuration > 0 && elapsed > 0 && totalOutputSize === 0) {
-        let encodingSpeed: number;
-        let finalizationOverheadSeconds: number;
-
-        if (config.encoder === "qsvh265") {
-          encodingSpeed = 0.3;
-          finalizationOverheadSeconds = 30;
-        } else if (config.encoder === "nvh265") {
-          encodingSpeed = 0.5;
-          finalizationOverheadSeconds = 20;
-        } else {
-          encodingSpeed = 0.2;
-          finalizationOverheadSeconds = 10;
-        }
-
-        const fileSizeGB = inputFileSize / (1024 * 1024 * 1024);
-        if (fileSizeGB > 5) {
-          finalizationOverheadSeconds += Math.min(60, fileSizeGB * 5);
-        }
-
-        const expectedEncodingTime = fileDuration / encodingSpeed;
-        const expectedTotalTime =
-          expectedEncodingTime + finalizationOverheadSeconds;
-
-        const progressRatio = Math.min(0.99, elapsed / expectedTotalTime);
-        fileProgress = Math.round(progressRatio * 100);
-
-        if (fileProgress > 0 && inputFileSize > 0) {
-          processedBytes = (fileProgress / 100) * inputFileSize;
-        }
-      } else if (
-        inputFileSize > 0 &&
-        processedBytes > 0 &&
-        totalOutputSize === 0
-      ) {
-        const byteRatio = Math.min(0.99, processedBytes / inputFileSize);
-        fileProgress = Math.round(byteRatio * 100);
-      } else if (fileDuration > 0 && bytesPerSecond > 0 && elapsed > 0) {
-        const estimatedTotalBytes = bytesPerSecond * fileDuration;
-        if (estimatedTotalBytes > 0) {
-          fileProgress = Math.min(
-            99,
-            Math.round((processedBytes / estimatedTotalBytes) * 100)
-          );
-        }
-      }
-
+      // ========================================
+      // 3. CALCULATE CHUNK PROGRESS
+      // ========================================
       let chunkProgress = 0;
 
       if (totalChunks === 1) {
+        // Single chunk: chunk progress = file progress
         chunkProgress = fileProgress;
-      } else if (
-        fileDuration > 0 &&
-        totalChunks > 0 &&
-        currentChunk > 0 &&
-        inputFileSize > 0
-      ) {
-        const bytesPerChunk = inputFileSize / totalChunks;
-        const currentChunkStartBytes = (currentChunk - 1) * bytesPerChunk;
-        const currentChunkEndBytes = currentChunk * bytesPerChunk;
-        const processedInCurrentChunk = Math.max(
-          0,
-          processedBytes - currentChunkStartBytes
+      } else if (totalChunks > 1 && currentChunk > 0 && fileDuration > 0) {
+        // Multiple chunks: calculate position within current chunk
+        const chunkDurationSec = chunkDuration;
+        const chunkStartTime = (currentChunk - 1) * chunkDurationSec;
+        const chunkEndTime = Math.min(
+          currentChunk * chunkDurationSec,
+          fileDuration
         );
-        const currentChunkBytes = currentChunkEndBytes - currentChunkStartBytes;
+        const chunkLength = chunkEndTime - chunkStartTime;
 
-        if (currentChunkBytes > 0) {
+        if (chunkLength > 0 && currentPositionSeconds >= chunkStartTime) {
+          const positionInChunk = currentPositionSeconds - chunkStartTime;
           chunkProgress = Math.min(
-            100,
-            Math.round((processedInCurrentChunk / currentChunkBytes) * 100)
+            99,
+            Math.round((positionInChunk / chunkLength) * 100)
           );
         }
-      } else if (totalChunks > 0 && currentChunk > 0) {
-        const progressPerChunk = 100 / totalChunks;
-        const baseProgress = (currentChunk - 1) * progressPerChunk;
-        const chunkProgressFromFile = fileProgress - baseProgress;
-        chunkProgress = Math.min(
-          100,
-          Math.max(
-            0,
-            Math.round((chunkProgressFromFile / progressPerChunk) * 100)
-          )
-        );
+
+        // If we've detected a new chunk file, the previous chunk is complete
+        if (chunkCount > currentChunk) {
+          chunkProgress = 100;
+        }
       }
 
+      // ========================================
+      // 4. CALCULATE ENCODING SPEED AND ETA
+      // ========================================
       let processingSpeed: number | undefined;
-
-      let estimatedEncodingSpeed: number;
-      if (config.encoder === "qsvh265") {
-        estimatedEncodingSpeed = 0.3;
-      } else if (config.encoder === "nvh265") {
-        estimatedEncodingSpeed = 0.5;
-      } else {
-        estimatedEncodingSpeed = 0.2;
-      }
-
-      if (bytesPerSecond > 0 && inputFileSize > 0 && fileDuration > 0) {
-        const bytesPerSecondOfVideo = inputFileSize / fileDuration;
-        if (bytesPerSecondOfVideo > 0) {
-          processingSpeed = bytesPerSecond / bytesPerSecondOfVideo;
-        }
-      } else if (fileDuration > 0 && elapsed > 0 && totalOutputSize === 0) {
-        processingSpeed = estimatedEncodingSpeed;
-      } else if (fileDuration > 0 && elapsed > 0 && fileProgress > 0) {
-        const estimatedProcessedDuration = (fileProgress / 100) * fileDuration;
-        if (estimatedProcessedDuration > 0) {
-          processingSpeed = estimatedProcessedDuration / elapsed;
-        }
-      } else if (bytesPerSecond > 0 && inputFileSize > 0) {
-        const estimatedDuration = (inputFileSize / bytesPerSecond) * 0.7;
-        if (estimatedDuration > 0 && elapsed > 0) {
-          processingSpeed =
-            ((processedBytes / inputFileSize) * estimatedDuration) / elapsed;
-        }
-      }
-
+      let eta: number | undefined;
       let chunkEta: number | undefined;
       let fileEta: number | undefined;
-      let eta: number | undefined;
 
-      if (inputFileSize > 0 && bytesPerSecond > 0) {
-        const remainingBytes = inputFileSize - processedBytes;
-
-        if (remainingBytes > 0) {
-          fileEta = Math.round(remainingBytes / bytesPerSecond);
-
-          if (totalChunks > 0 && currentChunk > 0) {
-            const bytesPerChunk = inputFileSize / totalChunks;
-            const currentChunkEndBytes = currentChunk * bytesPerChunk;
-            const remainingChunkBytes = currentChunkEndBytes - processedBytes;
-
-            if (remainingChunkBytes > 0) {
-              chunkEta = Math.round(remainingChunkBytes / bytesPerSecond);
-            }
-          }
-
-          eta = fileEta;
-        }
-      } else if (fileDuration > 0 && totalOutputSize === 0) {
-        let finalizationOverhead: number;
-        const fileSizeGB = inputFileSize / (1024 * 1024 * 1024);
-
-        if (config.encoder === "qsvh265") {
-          finalizationOverhead =
-            30 + (fileSizeGB > 5 ? Math.min(60, fileSizeGB * 5) : 0);
-        } else if (config.encoder === "nvh265") {
-          finalizationOverhead =
-            20 + (fileSizeGB > 5 ? Math.min(60, fileSizeGB * 5) : 0);
+      // Calculate encoding speed (realtime multiplier) with smoothing
+      if (currentPositionSeconds > 0 && elapsed > 0) {
+        const rawSpeed = currentPositionSeconds / elapsed;
+        
+        // Smooth the speed to prevent jitter (90% previous, 10% new)
+        if (smoothedSpeed === undefined) {
+          smoothedSpeed = rawSpeed;
         } else {
-          finalizationOverhead =
-            10 + (fileSizeGB > 5 ? Math.min(60, fileSizeGB * 5) : 0);
+          smoothedSpeed = smoothedSpeed * 0.9 + rawSpeed * 0.1;
         }
+        processingSpeed = smoothedSpeed;
+      }
 
-        const expectedEncodingTime = fileDuration / estimatedEncodingSpeed;
-        const expectedTotalTime = expectedEncodingTime + finalizationOverhead;
-
-        const remainingTime = Math.max(0, expectedTotalTime - elapsed);
-        fileEta = Math.round(remainingTime);
-        eta = fileEta;
-
-        if (totalChunks === 1) {
-          chunkEta = fileEta;
-        } else if (totalChunks > 0 && currentChunk > 0) {
-          const expectedChunkTime = expectedTotalTime / totalChunks;
-          const chunkEndTime = currentChunk * expectedChunkTime;
-          const remainingChunkTime = Math.max(0, chunkEndTime - elapsed);
-          chunkEta = Math.round(remainingChunkTime);
-        }
-      } else if (fileDuration > 0 && processingSpeed && processingSpeed > 0) {
-        let processedDurationFromBytes = 0;
-        if (inputFileSize > 0 && processedBytes > 0) {
-          processedDurationFromBytes =
-            (processedBytes / inputFileSize) * fileDuration;
-        } else if (fileProgress > 0) {
-          processedDurationFromBytes = (fileProgress / 100) * fileDuration;
-        }
-
-        const remainingDuration = fileDuration - processedDurationFromBytes;
-        if (remainingDuration > 0 && processingSpeed > 0) {
+      // Calculate ETA based on input progress (most reliable method)
+      if (
+        fileProgress >= MIN_PROGRESS_FOR_ETA &&
+        elapsed >= MIN_TIME_FOR_ETA &&
+        currentPositionSeconds > 0
+      ) {
+        const remainingDuration = fileDuration - currentPositionSeconds;
+        if (processingSpeed && processingSpeed > 0) {
           fileEta = Math.round(remainingDuration / processingSpeed);
           eta = fileEta;
 
-          if (totalChunks === 1) {
+          // Chunk ETA
+          if (totalChunks > 1 && currentChunk > 0) {
+            const chunkEndTime = Math.min(
+              currentChunk * chunkDuration,
+              fileDuration
+            );
+            const remainingInChunk = chunkEndTime - currentPositionSeconds;
+            if (remainingInChunk > 0) {
+              chunkEta = Math.round(remainingInChunk / processingSpeed);
+            }
+          } else {
             chunkEta = fileEta;
           }
         }
       }
 
+      // Apply heavy ETA smoothing to prevent jumps
+      // Professional apps show stable ETAs that decrease smoothly
+      let displayEta: number | undefined;
+      const hasEnoughDataForEta =
+        fileProgress >= MIN_PROGRESS_FOR_ETA && elapsed >= MIN_TIME_FOR_ETA;
+
+      if (eta !== undefined && hasEnoughDataForEta) {
+        if (smoothedEta === undefined) {
+          smoothedEta = eta;
+          etaStabilityCount = 1;
+        } else {
+          // Heavy smoothing: 95% previous value, 5% new value
+          // This prevents the jittery jumping while still tracking real changes
+          const newSmoothedEta = smoothedEta * 0.95 + eta * 0.05;
+          
+          // Only allow ETA to decrease naturally, or increase if significantly higher
+          // This prevents the "yo-yo" effect where ETA bounces up and down
+          if (newSmoothedEta < smoothedEta) {
+            // ETA is decreasing - allow it (normal progress)
+            smoothedEta = newSmoothedEta;
+          } else if (eta > smoothedEta * 1.1) {
+            // ETA increased by more than 10% - something changed, update slowly
+            smoothedEta = smoothedEta * 0.9 + eta * 0.1;
+          }
+          // Otherwise keep the previous ETA (small fluctuations ignored)
+          
+          etaStabilityCount = Math.min(10, etaStabilityCount + 1);
+        }
+
+        if (etaStabilityCount >= 2) {
+          // Round to nearest 5 seconds to reduce visual noise
+          displayEta = Math.round(smoothedEta / 5) * 5;
+        }
+      }
+
+      // ========================================
+      // 5. BUILD AND SEND PROGRESS UPDATE
+      // ========================================
+
+      // Format encoding speed
+      let speedStr = "";
+      if (processingSpeed !== undefined && processingSpeed > 0) {
+        speedStr = `, Speed: ${processingSpeed.toFixed(2)}x`;
+      }
+
+      // Format position
+      const posStr =
+        currentPositionSeconds > 0
+          ? `, Position: ${formatTime(Math.round(currentPositionSeconds))} / ${formatTime(Math.round(fileDuration))}`
+          : "";
+
+      // Format output size
+      const outputStr =
+        totalOutputSize > 0
+          ? `, Output: ${(totalOutputSize / (1024 * 1024)).toFixed(1)}MB`
+          : "";
+
+      // Format ETA
+      let etaStr = "";
+      if (displayEta !== undefined) {
+        etaStr = `, ETA: ${formatTime(displayEta)}`;
+      } else if (elapsed > 5 && currentPositionSeconds === 0) {
+        etaStr = `, ETA: starting...`;
+      } else if (elapsed > 5 && !hasEnoughDataForEta) {
+        etaStr = `, ETA: calculating...`;
+      }
+
       console.log(
-        `[Progress Update] File: ${fileProgress}%, Chunk: ${currentChunk}/${totalChunks} (${chunkProgress}%), ` +
-          `Overall ETA: ${eta !== undefined ? formatTime(eta) : "N/A"}, ` +
-          `Speed: ${processingSpeed ? processingSpeed.toFixed(2) + "x" : "N/A"}`
+        `[Progress] File: ${fileProgress}%, Chunk: ${currentChunk}/${totalChunks} (${chunkProgress}%)` +
+          posStr +
+          outputStr +
+          speedStr +
+          etaStr
       );
 
       onProgress({
         fileProgress,
         chunkProgress,
-        currentChunk: chunkCount > 0 ? currentChunk : fileDuration > 0 ? 1 : 0,
+        currentChunk: Math.max(1, currentChunk),
         totalChunks: Math.max(1, totalChunks),
-        eta,
-        chunkEta,
-        fileEta,
+        eta: displayEta,
+        chunkEta: displayEta !== undefined ? chunkEta : undefined,
+        fileEta: displayEta !== undefined ? fileEta : undefined,
         processingSpeed,
       });
     };
@@ -674,15 +756,71 @@ export function processVideoFileWithContext(
     // Send initial progress update
     sendProgressUpdate();
 
+    // Parse progressreport output to get input position
+    // Actual format: "progressreport0 (00:00:03): 0 / 1352 seconds ( 0.0 %)"
+    const parseProgressReport = (text: string) => {
+      // Match the actual progressreport format: position / duration seconds
+      const match = text.match(
+        /progressreport\d*\s*\([^)]+\):\s*(\d+)\s*\/\s*(\d+)\s*seconds/i
+      );
+      if (match) {
+        const position = parseInt(match[1], 10);
+        const duration = parseInt(match[2], 10);
+
+        // Update position (can be 0 at start, that's valid)
+        currentPositionSeconds = position;
+
+        // If we got a better duration from progressreport, use it
+        if (duration > 0 && (fileDuration === 0 || durationIsEstimated)) {
+          fileDuration = duration;
+          durationIsEstimated = false;
+          totalChunks = Math.ceil(fileDuration / chunkDuration);
+          console.log(
+            `[Progress] Duration from progressreport: ${duration}s, chunks: ${totalChunks}`
+          );
+        }
+
+        return true;
+      }
+      return false;
+    };
+
     gst.stdout.on("data", (data) => {
       const output = data.toString();
-      console.log(`[GStreamer] ${output}`);
+
+      // Try to parse progressreport data
+      if (parseProgressReport(output)) {
+        // Progress data parsed, trigger update
+        sendProgressUpdate();
+      } else if (output.trim()) {
+        // Only log non-progress output
+        console.log(`[GStreamer] ${output.trim()}`);
+      }
     });
 
     gst.stderr.on("data", (data) => {
-      const error = data.toString();
-      errorOutput += error;
-      console.error(`[GStreamer ERROR] ${error}`);
+      const text = data.toString();
+
+      // progressreport may output to stderr as well
+      if (parseProgressReport(text)) {
+        sendProgressUpdate();
+        return;
+      }
+
+      // Check if this is just GStreamer status messages (not errors)
+      const isStatusMessage =
+        text.includes("Setting pipeline") ||
+        text.includes("Pipeline is") ||
+        text.includes("New clock") ||
+        text.includes("Redistribute latency") ||
+        text.includes("high-resolution clock");
+
+      if (isStatusMessage) {
+        console.log(`[GStreamer] ${text.trim()}`);
+      } else if (text.trim()) {
+        errorOutput += text;
+        console.error(`[GStreamer ERROR] ${text.trim()}`);
+      }
     });
 
     // Set up periodic progress updates

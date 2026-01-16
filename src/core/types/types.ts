@@ -11,7 +11,7 @@ export interface BatchProcessConfig {
   outputDirectory: string;
   chunkDurationMinutes: number;
   outputFormat: 'mp4' | 'mkv' | 'mov';
-  encoder: 'x265' | 'nvh265' | 'qsvh265';
+  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc';
   bitrate?: number;
   speedPreset?: 'ultrafast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow';
 }
@@ -32,6 +32,9 @@ export interface ProcessStatus {
   fileEta?: number; // Estimated seconds remaining for current file
   fileDuration?: number; // Duration of current file in seconds
   processingSpeed?: number; // Processing speed (e.g., 1.5x realtime)
+  processedBytes?: number; // Total bytes processed so far
+  totalBytes?: number; // Total bytes to process
+  throughputBps?: number; // Current throughput in bytes per second
 }
 
 export interface ProgressCallback {

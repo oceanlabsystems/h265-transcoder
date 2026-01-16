@@ -1,0 +1,24 @@
+# H265 Transcoder Docker Compose
+# Quick start: docker-compose up -d
+
+version: '3.8'
+
+services:
+  h265-transcoder:
+    build: .
+    # Or use pre-built image:
+    # image: oceanlabsystems/h265-transcoder:latest
+    container_name: h265-transcoder
+    restart: unless-stopped
+    volumes:
+      # Mount your video directories
+      - ./input:/input:ro          # Source videos (read-only)
+      - ./output:/output           # Transcoded output
+      - ./config:/config           # Configuration file
+      # Optional: move processed files
+      # - ./processed:/processed
+      # - ./failed:/failed
+    environment:
+      - NODE_ENV=production
+    # Override default command if needed:
+    # command: ["--input", "/input", "--output", "/output", "--watch", "--encoder", "x265"]

@@ -9,7 +9,7 @@ files:
   - "!electron.vite.config.{js,ts,mjs,cjs}"
   - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
-  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,tsconfig.cli.json}"
   - out/**/*
   - resources/**/*
   - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
@@ -18,6 +18,7 @@ files:
   - "!**/node_modules/.bin"
 asarUnpack:
   - resources/**
+  - out/cli/**
 extraResources:
   - from: gstreamer
     to: gstreamer
@@ -25,8 +26,12 @@ extraResources:
       - "**/*"
       - "!**/*.msi"
       - "!**/*.pkg"
+  - from: installer/service
+    to: service
+    filter:
+      - "**/*"
 win:
-  executableName: sub-video-processor
+  executableName: H265 Transcoder
   icon: resources/icon.ico
   target:
     - target: nsis
@@ -41,6 +46,9 @@ nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
+  include: installer/nsis-installer.nsh
+  allowElevation: true
+  perMachine: true
 mac:
   icon: resources/icon.png
   category: public.app-category.utilities

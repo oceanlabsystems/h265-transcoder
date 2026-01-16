@@ -3,6 +3,9 @@
   "version": "1.1.3",
   "description": "An application to batch process videofiles into time based chunks and output to H.265",
   "main": "./out/main/index.js",
+  "bin": {
+    "h265-transcoder-cli": "./out/cli/cli/index.js"
+  },
   "author": {
     "name": "Oceanlab Systems",
     "email": "support@oceanlabsystems.com"
@@ -23,7 +26,9 @@
     "encoder",
     "gstreamer",
     "electron",
-    "batch-processing"
+    "batch-processing",
+    "cli",
+    "service"
   ],
   "license": "MIT",
   "build": {
@@ -36,7 +41,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "include": "installer/nsis-installer.nsh",
+      "customNsisBinary": null
     },
     "win": {
       "icon": "resources/icon.ico",
@@ -100,6 +107,13 @@
           "!**/*.msi",
           "!**/*.pkg"
         ]
+      },
+      {
+        "from": "installer/service",
+        "to": "service",
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   },
@@ -108,6 +122,7 @@
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck:cli": "tsc --noEmit -p tsconfig.cli.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
@@ -116,18 +131,24 @@
     "download-gstreamer": "node scripts/download-gstreamer.js",
     "prebuild": "npm run download-gstreamer",
     "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win --x64 --ia32",
-    "build:win32": "npm run build && electron-builder --win --ia32",
-    "build:win64": "npm run build && electron-builder --win --x64",
+    "build:win": "npm run build && npm run cli:build && electron-builder --win --x64 --ia32",
+    "build:win32": "npm run build && npm run cli:build && electron-builder --win --ia32",
+    "build:win64": "npm run build && npm run cli:build && electron-builder --win --x64",
     "prebuild:mac": "node scripts/download-gstreamer.js --platform darwin",
-    "build:mac": "npm run prebuild:mac && electron-vite build && electron-builder --mac",
+    "build:mac": "npm run prebuild:mac && electron-vite build && npm run cli:build && electron-builder --mac",
     "prebuild:linux": "echo 'GStreamer will be installed via system packages in CI'",
-    "build:linux": "npm run prebuild:linux && electron-vite build && electron-builder --linux",
+    "build:linux": "npm run prebuild:linux && electron-vite build && npm run cli:build && electron-builder --linux",
     "generate-icons": "node scripts/generate-icons.js",
     "release-major": "npx standard-version --release-as major && git push --follow-tags origin main",
     "release-minor": "npx standard-version --release-as minor && git push --follow-tags origin main",
     "release-patch": "npx standard-version --release-as patch && git push --follow-tags origin main",
-    "commit": "npx cz"
+    "commit": "npx cz",
+    "cli:dev": "ts-node src/cli/index.ts",
+    "cli:build": "tsc -p tsconfig.cli.json",
+    "cli:start": "node out/cli/cli/index.js",
+    "cli:package-linux": "bash scripts/build-linux-cli.sh",
+    "docker:build": "npm run cli:build && docker build -t h265-transcoder .",
+    "docker:run": "docker run -v ./input:/input -v ./output:/output -v ./config:/config h265-transcoder"
   },
   "config": {
     "commitizen": {
@@ -138,8 +159,11 @@
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
     "child_process": "^1.0.2",
+    "chokidar": "^3.6.0",
     "clsx": "^2.1.1",
+    "commander": "^12.1.0",
     "sonner": "^2.0.3",
+    "yaml": "^2.8.2",
     "yarn": "^1.22.22"
   },
   "devDependencies": {
@@ -173,6 +197,7 @@
     "tailwind-merge": "^2.5.4",
     "tailwindcss": "^3.4.13",
     "to-ico": "^1.1.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
     "vite": "^5.3.1"
   }

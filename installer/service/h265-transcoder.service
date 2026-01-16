@@ -1,0 +1,27 @@
+[Unit]
+Description=H265 Video Transcoder Service
+Documentation=https://github.com/oceanlabsystems/h265-transcoder
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/h265-transcoder
+
+# Run the CLI in watch mode with config file
+ExecStart=/usr/local/bin/h265-transcoder-cli --config /etc/h265-transcoder/config.yaml --watch
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=NODE_ENV=production
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=h265-transcoder
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# Ignore everything by default
+*
+
+# Include only what's needed for CLI
+!package.json
+!package-lock.json
+!out/cli/
+!installer/service/config.example.yaml
+
+# Exclude dev dependencies from node_modules
+node_modules/.cache
+node_modules/@types
+node_modules/typescript
+node_modules/electron*
+node_modules/vite
+node_modules/eslint*
+node_modules/prettier

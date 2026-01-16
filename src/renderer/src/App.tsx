@@ -95,6 +95,18 @@ function SpinnerIcon() {
   );
 }
 
+// Watch mode status interface
+interface WatchStatus {
+  active: boolean;
+  processing: boolean;
+  queued: number;
+  stats: {
+    filesProcessed: number;
+    filesFailed: number;
+    filesQueued: number;
+  };
+}
+
 function VideoProcessor() {
   const [inputDir, setInputDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
@@ -131,6 +143,15 @@ function VideoProcessor() {
   );
   const [isMaximized, setIsMaximized] = useState(false);
 
+  // Watch mode state
+  const [watchMode, setWatchMode] = useState(false);
+  const [watchStatus, setWatchStatus] = useState<WatchStatus>({
+    active: false,
+    processing: false,
+    queued: 0,
+    stats: { filesProcessed: 0, filesFailed: 0, filesQueued: 0 },
+  });
+
   useEffect(() => {
     const cleanup = window.api.ipcRenderer.on(
       "video:progress-update",
@@ -148,7 +169,7 @@ function VideoProcessor() {
         setFileEta(status.fileEta);
         setProcessingSpeed(status.processingSpeed);
 
-        if (status.status === "completed") {
+        if (status.status === "completed" && !watchMode) {
           setProcessing(false);
           if (status.error) {
             // Completed with some errors
@@ -160,7 +181,7 @@ function VideoProcessor() {
               `Batch complete! Processed ${status.totalFiles} file(s).`
             );
           }
-        } else if (status.status === "error") {
+        } else if (status.status === "error" && !watchMode) {
           setProcessing(false);
           toast.error(`Error: ${status.error || "Unknown error"}`);
         } else if (status.status === "processing" && status.error) {
@@ -168,7 +189,33 @@ function VideoProcessor() {
           toast.warning(
             `Skipped file: ${status.currentFile} - ${status.error}`
           );
+        } else if (status.status === "idle" && watchMode) {
+          setProcessing(false);
         }
+      }
+    );
+    return cleanup;
+  }, [watchMode]);
+
+  // Watch mode status listener
+  useEffect(() => {
+    const cleanup = window.api.ipcRenderer.on(
+      "video:watch-status",
+      (status: WatchStatus) => {
+        setWatchStatus(status);
+        setWatchMode(status.active);
+        setProcessing(status.processing);
+      }
+    );
+    return cleanup;
+  }, []);
+
+  // Watch mode file added listener
+  useEffect(() => {
+    const cleanup = window.api.ipcRenderer.on(
+      "video:watch-file-added",
+      (file: { path: string; name: string }) => {
+        toast.info(`New file detected: ${file.name}`);
       }
     );
     return cleanup;
@@ -250,7 +297,49 @@ function VideoProcessor() {
     }
   };
 
-  const canStart = inputDir && outputDir && files.length > 0 && !processing;
+  const toggleWatchMode = async () => {
+    if (watchMode) {
+      // Stop watch mode
+      try {
+        await window.api.ipcRenderer.invoke("video:stop-watch-mode");
+        setWatchMode(false);
+        toast.success("Watch mode stopped");
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to stop watch mode: ${errorMessage}`);
+      }
+    } else {
+      // Start watch mode
+      if (!inputDir || !outputDir) {
+        toast.error("Please select input and output directories");
+        return;
+      }
+
+      const config = {
+        inputDirectory: inputDir,
+        outputDirectory: outputDir,
+        chunkDurationMinutes: chunkDuration,
+        outputFormat,
+        encoder,
+        speedPreset: encoder === "x265" ? speedPreset : undefined,
+      };
+
+      try {
+        await window.api.ipcRenderer.invoke("video:start-watch-mode", config);
+        setWatchMode(true);
+        toast.success("Watch mode started - monitoring for new files");
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to start watch mode: ${errorMessage}`);
+      }
+    }
+  };
+
+  const canStart =
+    inputDir && outputDir && files.length > 0 && !processing && !watchMode;
+  const canWatch = inputDir && outputDir && !processing;
 
   return (
     <ConfigProvider
@@ -528,33 +617,123 @@ function VideoProcessor() {
                 </div>
               </div>
 
-              {/* Start Button */}
+              {/* Action Buttons */}
               <div
                 className="mt-4 sm:mt-6 pt-4 sm:pt-6"
                 style={{ borderTop: "1px solid var(--color-border)" }}
               >
-                <button
-                  onClick={startProcessing}
-                  disabled={!canStart}
-                  className="btn-primary w-full flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3"
-                >
-                  {processing ? (
-                    <>
-                      <SpinnerIcon />
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <PlayIcon />
-                      <span>Start Batch Process</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={startProcessing}
+                    disabled={!canStart}
+                    className="btn-primary flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3"
+                  >
+                    {processing && !watchMode ? (
+                      <>
+                        <SpinnerIcon />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlayIcon />
+                        <span>Start Batch</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={toggleWatchMode}
+                    disabled={!canWatch}
+                    className={`flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3 rounded-lg font-medium transition-all ${
+                      watchMode
+                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
+                        : "btn-secondary"
+                    }`}
+                  >
+                    {watchMode ? (
+                      <>
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <rect
+                            x="6"
+                            y="6"
+                            width="12"
+                            height="12"
+                            rx="2"
+                            strokeWidth={2}
+                          />
+                        </svg>
+                        <span>Stop Watch</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                          />
+                        </svg>
+                        <span>Watch Mode</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Watch mode status indicator */}
+                {watchMode && (
+                  <div
+                    className="mt-3 p-3 rounded-lg"
+                    style={{
+                      background: "rgba(249, 115, 22, 0.1)",
+                      border: "1px solid rgba(249, 115, 22, 0.3)",
+                    }}
+                  >
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                        <span style={{ color: "var(--color-warning)" }}>
+                          Watch Mode Active
+                        </span>
+                      </div>
+                      <div
+                        className="flex items-center gap-4 text-xs"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        <span>
+                          Processed: {watchStatus.stats.filesProcessed}
+                        </span>
+                        <span>Queued: {watchStatus.queued}</span>
+                        {watchStatus.stats.filesFailed > 0 && (
+                          <span className="text-red-400">
+                            Failed: {watchStatus.stats.filesFailed}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Progress Panel - Only shown when processing */}
-            {processing && (
+            {/* Progress Panel - Shown when processing or in watch mode with activity */}
+            {(processing || (watchMode && watchStatus.processing)) && (
               <div className="glass-panel p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5">
                 {/* Header with current file info */}
                 <div className="flex items-start justify-between gap-3">

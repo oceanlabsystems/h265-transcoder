@@ -4,8 +4,20 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import icon from "../../resources/icon.png?asset";
 import * as path from "path";
 import * as fs from "fs";
+import * as chokidar from "chokidar";
 import { processVideoFile } from "./gstreamer/video-split";
 import { BatchProcessConfig, ProcessStatus } from "./types/types";
+
+// Watch mode state
+let fileWatcher: chokidar.FSWatcher | null = null;
+let watchConfig: BatchProcessConfig | null = null;
+let watchQueue: Array<{ path: string; name: string }> = [];
+let isWatchProcessing = false;
+let watchStats = {
+  filesProcessed: 0,
+  filesFailed: 0,
+  filesQueued: 0,
+};
 
 // Supported video file extensions
 const VIDEO_EXTENSIONS = new Set([
@@ -177,36 +189,6 @@ app.on("window-all-closed", () => {
 
 // Setup IPC handlers
 function setupIpcHandlers(): void {
-  // Basic app info
-  ipcMain.handle("app:get-version", () => app.getVersion());
-
-  // Auto-launch functionality
-  ipcMain.handle(
-    "app:get-auto-launch-state",
-    () => app.getLoginItemSettings().openAtLogin
-  );
-  ipcMain.handle("app:set-auto-launch", (_, enabled: boolean) => {
-    app.setLoginItemSettings({
-      openAtLogin: enabled,
-    });
-  });
-
-  // External URL handling
-  ipcMain.handle("open:external-url", (_, url: string) => {
-    shell.openExternal(url);
-  });
-
-  // Generic app status events
-  ipcMain.on("app:action", (_event, action: string, data?: any) => {
-    // Handle app actions here
-    console.log(`Received app action: ${action}`, data);
-  });
-
-  // Ping/pong for connection testing
-  ipcMain.on("ping", (event) => {
-    event.sender.send("pong");
-  });
-
   // Window controls for frameless window
   ipcMain.handle("window:close", () => {
     const window = BrowserWindow.getFocusedWindow();
@@ -535,6 +517,201 @@ function setupIpcHandlers(): void {
       }
     }
   );
+
+  // Watch mode handlers
+  ipcMain.handle(
+    "video:start-watch-mode",
+    async (_, config: BatchProcessConfig) => {
+      try {
+        // Stop existing watcher if any
+        if (fileWatcher) {
+          await fileWatcher.close();
+          fileWatcher = null;
+        }
+
+        watchConfig = config;
+        watchQueue = [];
+        watchStats = { filesProcessed: 0, filesFailed: 0, filesQueued: 0 };
+
+        // Verify directories exist
+        if (!fs.existsSync(config.inputDirectory)) {
+          throw new Error("Input directory does not exist");
+        }
+        if (!fs.existsSync(config.outputDirectory)) {
+          fs.mkdirSync(config.outputDirectory, { recursive: true });
+        }
+
+        console.log(`[Watch Mode] Starting watch on: ${config.inputDirectory}`);
+
+        // Create file watcher
+        fileWatcher = chokidar.watch(config.inputDirectory, {
+          persistent: true,
+          ignoreInitial: false, // Process existing files
+          awaitWriteFinish: {
+            stabilityThreshold: 2000,
+            pollInterval: 100,
+          },
+          ignored: [
+            /(^|[\/\\])\../, // Ignore dotfiles
+            "**/*.part",
+            "**/*.tmp",
+            "**/*.crdownload",
+          ],
+        });
+
+        fileWatcher
+          .on("add", (filePath) => {
+            if (isVideoFile(filePath)) {
+              const fileName = path.basename(filePath);
+              console.log(`[Watch Mode] New file detected: ${fileName}`);
+              
+              // Add to queue if not already present
+              if (!watchQueue.some(f => f.path === filePath)) {
+                watchQueue.push({ path: filePath, name: fileName });
+                watchStats.filesQueued++;
+                
+                // Notify renderer
+                sendWatchStatus();
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                  mainWindow.webContents.send("video:watch-file-added", {
+                    path: filePath,
+                    name: fileName,
+                  });
+                }
+                
+                // Start processing if not already
+                processWatchQueue();
+              }
+            }
+          })
+          .on("error", (error) => {
+            console.error("[Watch Mode] Error:", error);
+          });
+
+        sendWatchStatus();
+        return { success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("[Watch Mode] Failed to start:", errorMessage);
+        throw error;
+      }
+    }
+  );
+
+  ipcMain.handle("video:stop-watch-mode", async () => {
+    if (fileWatcher) {
+      await fileWatcher.close();
+      fileWatcher = null;
+      console.log("[Watch Mode] Stopped");
+    }
+    watchConfig = null;
+    watchQueue = [];
+    isWatchProcessing = false;
+    sendWatchStatus();
+    return { success: true };
+  });
+
+  ipcMain.handle("video:get-watch-status", () => {
+    return {
+      active: fileWatcher !== null,
+      processing: isWatchProcessing,
+      queued: watchQueue.length,
+      stats: watchStats,
+    };
+  });
+}
+
+// Process the watch queue
+async function processWatchQueue(): Promise<void> {
+  if (isWatchProcessing || !watchConfig || watchQueue.length === 0) {
+    return;
+  }
+
+  isWatchProcessing = true;
+  sendWatchStatus();
+
+  while (watchQueue.length > 0 && watchConfig) {
+    const file = watchQueue[0];
+    
+    try {
+      console.log(`[Watch Mode] Processing: ${file.name}`);
+
+      sendProgressUpdate({
+        currentFile: file.name,
+        currentFileIndex: watchStats.filesProcessed + 1,
+        totalFiles: watchStats.filesProcessed + watchQueue.length,
+        currentChunk: 0,
+        totalChunks: 0,
+        fileProgress: 0,
+        chunkProgress: 0,
+        overallProgress: 0,
+        status: "processing",
+      });
+
+      await processVideoFile(
+        file.path,
+        watchConfig.outputDirectory,
+        watchConfig,
+        (progressStatus) => {
+          sendProgressUpdate({
+            currentFile: file.name,
+            currentFileIndex: watchStats.filesProcessed + 1,
+            totalFiles: watchStats.filesProcessed + watchQueue.length,
+            currentChunk: progressStatus.currentChunk,
+            totalChunks: progressStatus.totalChunks,
+            fileProgress: progressStatus.fileProgress,
+            chunkProgress: progressStatus.chunkProgress,
+            overallProgress: progressStatus.fileProgress,
+            status: "processing",
+            eta: progressStatus.eta,
+            chunkEta: progressStatus.chunkEta,
+            fileEta: progressStatus.fileEta,
+            processingSpeed: progressStatus.processingSpeed,
+          });
+        }
+      );
+
+      watchStats.filesProcessed++;
+      console.log(`[Watch Mode] Completed: ${file.name}`);
+    } catch (error) {
+      watchStats.filesFailed++;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Watch Mode] Failed: ${file.name} - ${errorMessage}`);
+    }
+
+    // Remove from queue
+    watchQueue.shift();
+    sendWatchStatus();
+  }
+
+  isWatchProcessing = false;
+  sendWatchStatus();
+
+  // Send idle status when queue is empty
+  if (watchQueue.length === 0) {
+    sendProgressUpdate({
+      currentFile: "",
+      currentFileIndex: 0,
+      totalFiles: 0,
+      currentChunk: 0,
+      totalChunks: 0,
+      fileProgress: 0,
+      chunkProgress: 0,
+      overallProgress: 0,
+      status: "idle",
+    });
+  }
+}
+
+function sendWatchStatus(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("video:watch-status", {
+      active: fileWatcher !== null,
+      processing: isWatchProcessing,
+      queued: watchQueue.length,
+      stats: watchStats,
+    });
+  }
 }
 
 function sendProgressUpdate(status: ProcessStatus): void {

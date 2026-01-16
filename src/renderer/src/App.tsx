@@ -1,9 +1,30 @@
 import { useState, useEffect } from "react";
-import { Select, ConfigProvider, theme, Modal } from "antd";
+import { Select, ConfigProvider, theme, Modal, Tooltip, Spin } from "antd";
 import { toast, Toaster } from "sonner";
 import "@renderer/assets/index.css";
 
 const { Option } = Select;
+
+// Encoder type (must match main process)
+type EncoderType = "x265" | "nvh265" | "qsvh265" | "vtenc";
+
+// Encoder info interface (matches main process)
+interface EncoderInfo {
+  id: EncoderType;
+  name: string;
+  description: string;
+  gstreamerElement: string;
+  available: boolean;
+  recommended: boolean;
+  priority: number;
+  platform: "all" | "windows" | "macos" | "linux";
+}
+
+interface EncoderDetectionResult {
+  encoders: EncoderInfo[];
+  recommended: EncoderType;
+  hasHardwareEncoder: boolean;
+}
 
 // Helper function to format time in seconds to readable format
 function formatTime(seconds: number): string {
@@ -18,6 +39,33 @@ function formatTime(seconds: number): string {
   } else {
     return `${secs}s`;
   }
+}
+
+// Helper function to format bytes to human-readable format (MB/GB)
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) {
+    return `${gb.toFixed(2)} GB`;
+  }
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(1)} MB`;
+}
+
+// Helper function to format throughput in bits per second
+function formatThroughput(bytesPerSecond: number): string {
+  if (bytesPerSecond === 0) return "0 bps";
+  const bitsPerSecond = bytesPerSecond * 8;
+  const gbps = bitsPerSecond / 1000000000;
+  if (gbps >= 1) {
+    return `${gbps.toFixed(2)} Gbps`;
+  }
+  const mbps = bitsPerSecond / 1000000;
+  if (mbps >= 1) {
+    return `${mbps.toFixed(1)} Mbps`;
+  }
+  const kbps = bitsPerSecond / 1000;
+  return `${kbps.toFixed(0)} kbps`;
 }
 
 // Custom Progress Bar component
@@ -114,7 +162,10 @@ function VideoProcessor() {
   const [outputFormat, setOutputFormat] = useState<"mp4" | "mkv" | "mov">(
     "mkv"
   );
-  const [encoder, setEncoder] = useState<"x265" | "nvh265" | "qsvh265">("x265");
+  const [encoder, setEncoder] = useState<EncoderType>("x265");
+  const [availableEncoders, setAvailableEncoders] = useState<EncoderInfo[]>([]);
+  const [detectingEncoders, setDetectingEncoders] = useState(true);
+  const [hasHardwareEncoder, setHasHardwareEncoder] = useState(false);
   const [speedPreset, setSpeedPreset] = useState<
     | "ultrafast"
     | "veryfast"
@@ -141,6 +192,9 @@ function VideoProcessor() {
   const [processingSpeed, setProcessingSpeed] = useState<number | undefined>(
     undefined
   );
+  const [processedBytes, setProcessedBytes] = useState<number>(0);
+  const [totalBytes, setTotalBytes] = useState<number>(0);
+  const [throughputBps, setThroughputBps] = useState<number>(0);
   const [isMaximized, setIsMaximized] = useState(false);
 
   // Watch mode state
@@ -158,6 +212,55 @@ function VideoProcessor() {
   // Help modal state
   const [helpModalOpen, setHelpModalOpen] = useState(false);
 
+  // Detect available encoders on mount
+  useEffect(() => {
+    const detectEncoders = async () => {
+      setDetectingEncoders(true);
+      try {
+        const result: EncoderDetectionResult =
+          await window.api.ipcRenderer.invoke("video:detect-encoders");
+        setAvailableEncoders(result.encoders);
+        setHasHardwareEncoder(result.hasHardwareEncoder);
+
+        // Set the recommended encoder as default
+        if (result.recommended) {
+          setEncoder(result.recommended);
+        }
+
+        // Show toast if hardware encoder was detected
+        if (result.hasHardwareEncoder) {
+          const hwEncoder = result.encoders.find(
+            (e) => e.recommended && e.id !== "x265"
+          );
+          if (hwEncoder) {
+            toast.success(`Hardware encoder detected: ${hwEncoder.name}`, {
+              duration: 3000,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to detect encoders:", error);
+        // Default to software encoder
+        setAvailableEncoders([
+          {
+            id: "x265",
+            name: "Software (x265)",
+            description: "CPU-based encoding",
+            gstreamerElement: "x265enc",
+            available: true,
+            recommended: true,
+            priority: 10,
+            platform: "all",
+          },
+        ]);
+      } finally {
+        setDetectingEncoders(false);
+      }
+    };
+
+    detectEncoders();
+  }, []);
+
   useEffect(() => {
     const cleanup = window.api.ipcRenderer.on(
       "video:progress-update",
@@ -174,6 +277,9 @@ function VideoProcessor() {
         setChunkEta(status.chunkEta);
         setFileEta(status.fileEta);
         setProcessingSpeed(status.processingSpeed);
+        setProcessedBytes(status.processedBytes || 0);
+        setTotalBytes(status.totalBytes || 0);
+        setThroughputBps(status.throughputBps || 0);
 
         if (status.status === "completed" && !watchMode) {
           setProcessing(false);
@@ -195,8 +301,13 @@ function VideoProcessor() {
           toast.warning(
             `Skipped file: ${status.currentFile} - ${status.error}`
           );
-        } else if (status.status === "idle" && watchMode) {
+        } else if (status.status === "idle") {
+          // Handle idle status for both watch mode and batch cancellation
           setProcessing(false);
+          if (!watchMode && status.error) {
+            // Batch was cancelled
+            toast.info(status.error || "Processing cancelled");
+          }
         }
       }
     );
@@ -521,171 +632,239 @@ function VideoProcessor() {
 
         {/* Main Content - scrollable */}
         <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+          <div className="max-w-6xl mx-auto space-y-4 sm:space-y-5">
             {/* Settings Panel */}
             <div className="glass-panel-elevated p-4 sm:p-5 md:p-6">
-              <h2
-                className="text-sm sm:text-base font-semibold mb-4 sm:mb-6"
-                style={{
-                  fontFamily: "'Outfit', sans-serif",
-                  color: "var(--color-text)",
-                }}
-              >
-                Encoding Settings
-              </h2>
-
-              {/* Responsive grid - single column on small, two on large */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 md:gap-6">
-                {/* Left Column - Directories */}
-                <div className="space-y-4 sm:space-y-5">
-                  {/* Input Directory */}
-                  <div>
-                    <label className="label-text text-xs sm:text-sm">
-                      Input Directory
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={inputDir}
-                        readOnly
-                        placeholder="Select source folder..."
-                        className="input-field flex-1 min-w-0 text-xs sm:text-sm py-2 sm:py-2.5"
-                      />
-                      <button
-                        onClick={selectInputDir}
-                        className="btn-secondary flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm flex-shrink-0"
-                      >
-                        <FolderIcon />
-                        <span className="hidden sm:inline">Browse</span>
-                      </button>
-                    </div>
-                    {files.length > 0 && (
-                      <div className="mt-2">
-                        <span className="file-badge text-[10px] sm:text-xs">
-                          {files.length} video file
-                          {files.length !== 1 ? "s" : ""} found
-                        </span>
-                      </div>
-                    )}
+              {/* Directory Selection Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 mb-5">
+                {/* Input Directory */}
+                <div>
+                  <label className="label-text text-xs sm:text-sm mb-2 block">
+                    Input Directory
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inputDir}
+                      readOnly
+                      placeholder="Select source folder..."
+                      className="input-field flex-1 min-w-0 text-xs sm:text-sm"
+                    />
+                    <button
+                      onClick={selectInputDir}
+                      className="btn-secondary flex items-center gap-2 px-3 sm:px-4 flex-shrink-0"
+                    >
+                      <FolderIcon />
+                      <span className="hidden sm:inline">Browse</span>
+                    </button>
                   </div>
-
-                  {/* Output Directory */}
-                  <div>
-                    <label className="label-text text-xs sm:text-sm">
-                      Output Directory
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={outputDir}
-                        readOnly
-                        placeholder="Select output folder..."
-                        className="input-field flex-1 min-w-0 text-xs sm:text-sm py-2 sm:py-2.5"
-                      />
-                      <button
-                        onClick={selectOutputDir}
-                        className="btn-secondary flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm flex-shrink-0"
-                      >
-                        <FolderIcon />
-                        <span className="hidden sm:inline">Browse</span>
-                      </button>
-                    </div>
-                  </div>
+                  {files.length > 0 && (
+                    <span className="file-badge text-xs mt-2 inline-block">
+                      {files.length} file{files.length !== 1 ? "s" : ""} found
+                    </span>
+                  )}
                 </div>
 
-                {/* Right Column - Options */}
-                <div className="space-y-4 sm:space-y-5">
-                  {/* Chunk Duration & Format - responsive grid */}
-                  <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                    <div>
-                      <label className="label-text text-xs sm:text-sm">
-                        Chunk (min)
-                      </label>
-                      <input
-                        type="number"
-                        value={chunkDuration}
-                        onChange={(e) =>
-                          setChunkDuration(Number(e.target.value))
-                        }
-                        className="input-field text-xs sm:text-sm py-2 sm:py-2.5"
-                        min={1}
-                        max={120}
-                      />
-                    </div>
-                    <div>
-                      <label className="label-text text-xs sm:text-sm">
-                        Output Format
-                      </label>
-                      <Select
-                        value={outputFormat}
-                        onChange={setOutputFormat}
-                        className="w-full"
-                        popupClassName="custom-select-dropdown"
-                        size="middle"
-                      >
-                        <Option value="mkv">MKV</Option>
-                        <Option value="mp4">MP4</Option>
-                        <Option value="mov">MOV</Option>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Encoder & Speed Preset */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div>
-                      <label className="label-text text-xs sm:text-sm">
-                        Encoder
-                      </label>
-                      <Select
-                        value={encoder}
-                        onChange={setEncoder}
-                        className="w-full"
-                        size="middle"
-                      >
-                        <Option value="x265">x265 (CPU)</Option>
-                        <Option value="qsvh265">Intel QSV</Option>
-                        <Option value="nvh265">NVIDIA NVENC</Option>
-                      </Select>
-                    </div>
-                    {encoder === "x265" && (
-                      <div>
-                        <label className="label-text text-xs sm:text-sm">
-                          Preset
-                        </label>
-                        <Select
-                          value={speedPreset}
-                          onChange={setSpeedPreset}
-                          className="w-full"
-                          size="middle"
-                        >
-                          <Option value="ultrafast">Ultrafast</Option>
-                          <Option value="veryfast">Very Fast</Option>
-                          <Option value="faster">Faster</Option>
-                          <Option value="fast">Fast</Option>
-                          <Option value="medium">Medium</Option>
-                          <Option value="slow">Slow</Option>
-                          <Option value="slower">Slower</Option>
-                          <Option value="veryslow">Very Slow</Option>
-                        </Select>
-                      </div>
-                    )}
+                {/* Output Directory */}
+                <div>
+                  <label className="label-text text-xs sm:text-sm mb-2 block">
+                    Output Directory
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={outputDir}
+                      readOnly
+                      placeholder="Select output folder..."
+                      className="input-field flex-1 min-w-0 text-xs sm:text-sm"
+                    />
+                    <button
+                      onClick={selectOutputDir}
+                      className="btn-secondary flex items-center gap-2 px-3 sm:px-4 flex-shrink-0"
+                    >
+                      <FolderIcon />
+                      <span className="hidden sm:inline">Browse</span>
+                    </button>
                   </div>
                 </div>
               </div>
 
+              {/* Encoding Options Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-5">
+                {/* Chunk Duration */}
+                <div>
+                  <label className="label-text text-xs sm:text-sm mb-2 block">
+                    Chunk (min)
+                  </label>
+                  <input
+                    type="number"
+                    value={chunkDuration}
+                    onChange={(e) => setChunkDuration(Number(e.target.value))}
+                    className="input-field text-xs sm:text-sm"
+                    min={1}
+                    max={120}
+                  />
+                </div>
+
+                {/* Format */}
+                <div>
+                  <label className="label-text text-xs sm:text-sm mb-2 block">
+                    Format
+                  </label>
+                  <Select
+                    value={outputFormat}
+                    onChange={setOutputFormat}
+                    className="w-full"
+                    popupClassName="custom-select-dropdown"
+                  >
+                    <Option value="mkv">MKV</Option>
+                    <Option value="mp4">MP4</Option>
+                    <Option value="mov">MOV</Option>
+                  </Select>
+                </div>
+
+                {/* Encoder */}
+                <div>
+                  <label className="label-text text-xs sm:text-sm mb-2 flex items-center gap-2">
+                    Encoder
+                    {hasHardwareEncoder && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30">
+                        GPU
+                      </span>
+                    )}
+                  </label>
+                  {detectingEncoders ? (
+                    <div className="flex items-center justify-center h-[38px] rounded-lg border border-white/10 bg-white/5">
+                      <Spin size="small" />
+                      <span className="ml-2 text-xs text-gray-400">
+                        Detecting...
+                      </span>
+                    </div>
+                  ) : (
+                    <Select
+                      value={encoder}
+                      onChange={setEncoder}
+                      className="w-full"
+                      disabled={processing}
+                    >
+                      {availableEncoders
+                        .filter((e) => e.available)
+                        .sort((a, b) => b.priority - a.priority)
+                        .map((enc) => (
+                          <Option key={enc.id} value={enc.id}>
+                            <Tooltip title={enc.description} placement="left">
+                              <span>
+                                {enc.name}
+                                {enc.recommended && (
+                                  <span
+                                    className="ml-1.5 text-yellow-400"
+                                    title="Recommended"
+                                  >
+                                    ★
+                                  </span>
+                                )}
+                              </span>
+                            </Tooltip>
+                          </Option>
+                        ))}
+                    </Select>
+                  )}
+                </div>
+
+                {/* Speed Preset - only for x265 */}
+                {encoder === "x265" ? (
+                  <div>
+                    <label className="label-text text-xs sm:text-sm mb-2 block">
+                      Preset
+                    </label>
+                    <Select
+                      value={speedPreset}
+                      onChange={setSpeedPreset}
+                      className="w-full"
+                    >
+                      <Option value="ultrafast">Ultrafast</Option>
+                      <Option value="veryfast">Veryfast</Option>
+                      <Option value="faster">Faster</Option>
+                      <Option value="fast">Fast</Option>
+                      <Option value="medium">Medium</Option>
+                      <Option value="slow">Slow</Option>
+                      <Option value="slower">Slower</Option>
+                      <Option value="veryslow">Veryslow</Option>
+                    </Select>
+                  </div>
+                ) : (
+                  <div /> /* Empty placeholder for grid alignment */
+                )}
+              </div>
+
               {/* Action Buttons */}
               <div
-                className="mt-4 sm:mt-6 pt-4 sm:pt-6"
+                className="pt-4 flex flex-wrap items-center gap-3"
                 style={{ borderTop: "1px solid var(--color-border)" }}
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {processing && !watchMode ? (
-                    <button
-                      onClick={cancelProcessing}
-                      className="flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3 rounded-lg font-medium transition-all bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30"
+                {processing && !watchMode ? (
+                  <button
+                    onClick={cancelProcessing}
+                    className="flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
                     >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                    <span>Cancel</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={startProcessing}
+                    disabled={!canStart}
+                    className="btn-primary flex items-center justify-center gap-2 text-sm px-5 py-2.5"
+                  >
+                    <PlayIcon />
+                    <span>Start Batch</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={toggleWatchMode}
+                  disabled={!canWatch}
+                  className={`flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all ${
+                    watchMode
+                      ? "bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
+                      : "btn-secondary"
+                  }`}
+                >
+                  {watchMode ? (
+                    <>
                       <svg
-                        className="w-5 h-5"
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <rect
+                          x="6"
+                          y="6"
+                          width="12"
+                          height="12"
+                          rx="2"
+                          strokeWidth={2}
+                        />
+                      </svg>
+                      <span>Stop Watch</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -694,262 +873,216 @@ function VideoProcessor() {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                         />
                       </svg>
-                      <span>Cancel</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={startProcessing}
-                      disabled={!canStart}
-                      className="btn-primary flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3"
-                    >
-                      <PlayIcon />
-                      <span>Start Batch</span>
-                    </button>
+                      <span>Watch Mode</span>
+                    </>
                   )}
+                </button>
 
-                  <button
-                    onClick={toggleWatchMode}
-                    disabled={!canWatch}
-                    className={`flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3 rounded-lg font-medium transition-all ${
-                      watchMode
-                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
-                        : "btn-secondary"
-                    }`}
-                  >
-                    {watchMode ? (
-                      <>
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <rect
-                            x="6"
-                            y="6"
-                            width="12"
-                            height="12"
-                            rx="2"
-                            strokeWidth={2}
-                          />
-                        </svg>
-                        <span>Stop Watch</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                          />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                          />
-                        </svg>
-                        <span>Watch Mode</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Watch mode status indicator */}
+                {/* Watch mode status - inline */}
                 {watchMode && (
                   <div
-                    className="mt-3 p-3 rounded-lg"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm ml-auto"
                     style={{
                       background: "rgba(249, 115, 22, 0.1)",
                       border: "1px solid rgba(249, 115, 22, 0.3)",
                     }}
                   >
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-                        <span style={{ color: "var(--color-warning)" }}>
-                          Watch Mode Active
+                    <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                    <span style={{ color: "var(--color-warning)" }}>
+                      Active
+                    </span>
+                    <span style={{ color: "var(--color-text-muted)" }}>
+                      {watchStatus.stats.filesProcessed} done
+                      {watchStatus.queued > 0 &&
+                        ` • ${watchStatus.queued} queued`}
+                      {watchStatus.stats.filesFailed > 0 && (
+                        <span className="text-red-400 ml-1">
+                          • {watchStatus.stats.filesFailed} failed
                         </span>
-                      </div>
-                      <div
-                        className="flex items-center gap-4 text-xs"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        <span>
-                          Processed: {watchStatus.stats.filesProcessed}
-                        </span>
-                        <span>Queued: {watchStatus.queued}</span>
-                        {watchStatus.stats.filesFailed > 0 && (
-                          <span className="text-red-400">
-                            Failed: {watchStatus.stats.filesFailed}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                      )}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Progress Panel - Shown when processing or in watch mode with activity */}
-            {(processing || (watchMode && watchStatus.processing)) && (
-              <div className="glass-panel p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5">
-                {/* Header with current file info */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className="text-xs sm:text-sm font-medium truncate"
-                      style={{ color: "var(--color-text)" }}
-                    >
-                      {currentFile || "Starting..."}
-                    </p>
-                    <p
-                      className="text-[10px] sm:text-xs mt-0.5 sm:mt-1"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      File {currentFileIndex} of {totalFiles}
-                      {totalChunks > 1 && (
-                        <span className="hidden sm:inline">
-                          {" "}
-                          • {totalChunks} chunks ({chunkDuration} min)
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {processingSpeed !== undefined && (
-                    <div className="text-right flex-shrink-0">
-                      <p className="stat-value text-base sm:text-lg">
-                        {processingSpeed.toFixed(2)}x
-                      </p>
-                      <p className="stat-label text-[10px] sm:text-xs">Speed</p>
-                    </div>
-                  )}
+            {/* Progress Panel - Always visible */}
+            <div className="glass-panel p-4 sm:p-5 md:p-6 space-y-4">
+              {/* Stats Row */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                {/* Left: File info or idle state */}
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-sm sm:text-base font-medium truncate"
+                    style={{
+                      color: processing
+                        ? "var(--color-text)"
+                        : "var(--color-text-muted)",
+                    }}
+                  >
+                    {processing
+                      ? currentFile || "Starting..."
+                      : "Ready to process"}
+                  </p>
+                  <p
+                    className="text-xs sm:text-sm mt-0.5"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {processing
+                      ? `File ${currentFileIndex}/${totalFiles}${totalChunks > 1 ? ` • Chunk ${currentChunk}/${totalChunks}` : ""}`
+                      : files.length > 0
+                        ? `${files.length} file(s) queued`
+                        : "Select directories to begin"}
+                  </p>
                 </div>
 
-                {/* Overall Progress */}
-                <div className="space-y-1.5 sm:space-y-2">
-                  <div className="flex justify-between items-center flex-wrap gap-1">
-                    <span
-                      className="text-[10px] sm:text-xs font-medium"
-                      style={{ color: "var(--color-text-muted)" }}
+                {/* Right: Stats */}
+                <div className="flex items-center gap-5 sm:gap-6 flex-shrink-0">
+                  {/* Data processed */}
+                  <div className="text-center sm:text-right">
+                    <p
+                      className="text-sm sm:text-base font-mono font-medium"
+                      style={{
+                        color: processing
+                          ? "var(--color-accent)"
+                          : "var(--color-text-muted)",
+                      }}
                     >
-                      Overall
-                    </span>
-                    <div className="flex items-center gap-2 sm:gap-3">
-                      <span className="stat-value text-xs sm:text-sm">
-                        {overallProgress}%
-                      </span>
-                      {eta !== undefined && eta >= 0 && (
-                        <span
-                          className="text-[10px] sm:text-xs"
-                          style={{ color: "var(--color-text-muted)" }}
-                        >
-                          {formatTime(eta)}
-                        </span>
-                      )}
-                    </div>
+                      {processing && totalBytes > 0
+                        ? `${formatBytes(processedBytes)} / ${formatBytes(totalBytes)}`
+                        : "— / —"}
+                    </p>
+                    <p className="stat-label text-xs mt-0.5">Data</p>
                   </div>
-                  <ProgressBar percent={overallProgress} color="cyan" />
+
+                  {/* Throughput */}
+                  <div className="text-center sm:text-right">
+                    <p
+                      className="stat-value text-sm sm:text-base"
+                      style={{
+                        color:
+                          processing && throughputBps > 0
+                            ? "var(--color-text)"
+                            : "var(--color-text-muted)",
+                      }}
+                    >
+                      {processing && throughputBps > 0
+                        ? formatThroughput(throughputBps)
+                        : "—"}
+                    </p>
+                    <p className="stat-label text-xs mt-0.5">Throughput</p>
+                  </div>
+
+                  {/* Speed */}
+                  <div className="text-center sm:text-right">
+                    <p
+                      className="stat-value text-base sm:text-lg"
+                      style={{
+                        color:
+                          processing && processingSpeed !== undefined
+                            ? "var(--color-accent)"
+                            : "var(--color-text-muted)",
+                      }}
+                    >
+                      {processing && processingSpeed !== undefined
+                        ? `${processingSpeed.toFixed(2)}x`
+                        : "—"}
+                    </p>
+                    <p className="stat-label text-xs mt-0.5">Speed</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bars */}
+              <div className="space-y-3">
+                {/* Overall Progress */}
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-xs sm:text-sm w-14 sm:w-16 font-medium"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Overall
+                  </span>
+                  <div className="flex-1">
+                    <ProgressBar percent={overallProgress} color="cyan" />
+                  </div>
+                  <span
+                    className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {processing ? `${overallProgress}%` : "0%"}
+                    {processing && eta !== undefined && eta >= 0 && (
+                      <span className="ml-2 opacity-75">{formatTime(eta)}</span>
+                    )}
+                  </span>
                 </div>
 
                 {/* File Progress */}
-                {currentFile && (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <div className="flex justify-between items-center flex-wrap gap-1">
-                      <span
-                        className="text-[10px] sm:text-xs font-medium"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        File
-                      </span>
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <span
-                          className="stat-value text-xs sm:text-sm"
-                          style={{ color: "var(--color-success)" }}
-                        >
-                          {fileProgress}%
-                        </span>
-                        {fileEta !== undefined && fileEta >= 0 && (
-                          <span
-                            className="text-[10px] sm:text-xs"
-                            style={{ color: "var(--color-text-muted)" }}
-                          >
-                            {formatTime(fileEta)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-xs sm:text-sm w-14 sm:w-16 font-medium"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    File
+                  </span>
+                  <div className="flex-1">
                     <ProgressBar percent={fileProgress} color="green" />
                   </div>
-                )}
+                  <span
+                    className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {processing ? `${fileProgress}%` : "0%"}
+                  </span>
+                </div>
 
                 {/* Chunk Progress */}
-                {totalChunks > 0 && currentChunk > 0 && (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <div className="flex justify-between items-center flex-wrap gap-1">
-                      <span
-                        className="text-[10px] sm:text-xs font-medium"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        Chunk {currentChunk}/{totalChunks}
-                      </span>
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <span
-                          className="stat-value text-xs sm:text-sm"
-                          style={{ color: "var(--color-warning)" }}
-                        >
-                          {chunkProgress}%
-                        </span>
-                        {chunkEta !== undefined && chunkEta >= 0 && (
-                          <span
-                            className="text-[10px] sm:text-xs"
-                            style={{ color: "var(--color-text-muted)" }}
-                          >
-                            {formatTime(chunkEta)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-xs sm:text-sm w-14 sm:w-16 font-medium"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Chunk
+                  </span>
+                  <div className="flex-1">
                     <ProgressBar percent={chunkProgress} color="orange" />
                   </div>
-                )}
+                  <span
+                    className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {processing && totalChunks > 0
+                      ? `${currentChunk}/${totalChunks}`
+                      : "0/0"}
+                  </span>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </main>
 
-        {/* Footer - responsive */}
+        {/* Footer */}
         <footer
-          className="flex-shrink-0 px-3 sm:px-6 py-2 sm:py-3 text-center text-[10px] sm:text-xs border-t"
+          className="flex-shrink-0 px-4 sm:px-6 py-2.5 sm:py-3 text-center text-xs sm:text-sm border-t"
           style={{
             borderColor: "var(--color-border)",
             color: "var(--color-text-muted)",
           }}
         >
           <span className="hidden sm:inline">
-            H.265/HEVC Batch Transcoder {appVersion && `v${appVersion}`} •
-            GStreamer Pipeline •{" "}
-            <a
-              href="https://www.oceanlabsystems.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: "inherit", textDecoration: "underline" }}
-            >
-              Powered by Oceanlab Systems
-            </a>
+            H.265/HEVC Batch Transcoder • {appVersion && `v${appVersion}`}
           </span>
           <span className="sm:hidden">
-            H.265 Transcoder {appVersion && `v${appVersion}`} • GStreamer
+            H.265 Transcoder • {appVersion && `v${appVersion}`}
           </span>
         </footer>
       </div>

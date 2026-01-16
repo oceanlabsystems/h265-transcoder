@@ -2,9 +2,13 @@ import { app } from 'electron';
 import { BatchProcessConfig, ProgressCallback } from '../types/types';
 import { 
   getVideoDurationWithContext, 
-  processVideoFileWithContext 
+  processVideoFileWithContext,
+  ProcessCancelledError 
 } from '../../core/gstreamer/video-split';
 import { RuntimeContext } from '../../core/utils/gstreamer-path';
+
+// Re-export ProcessCancelledError for use in main process
+export { ProcessCancelledError };
 
 /**
  * Create Electron-specific runtime context
@@ -31,13 +35,15 @@ export function processVideoFile(
   inputPath: string,
   outputDirectory: string,
   config: BatchProcessConfig,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   return processVideoFileWithContext(
     inputPath,
     outputDirectory,
     config,
     createElectronContext(),
-    onProgress
+    onProgress,
+    abortSignal
   );
 }

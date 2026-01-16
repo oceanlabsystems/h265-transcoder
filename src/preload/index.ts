@@ -10,6 +10,7 @@ const api = {
         "video:select-output-directory",
         "video:scan-directory",
         "video:start-batch-process",
+        "video:cancel-batch-process",
         "video:start-watch-mode",
         "video:stop-watch-mode",
         // Window controls

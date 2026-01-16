@@ -122,14 +122,36 @@ export function getVideoDurationWithContext(
   });
 }
 
+// Cancellation error class
+export class ProcessCancelledError extends Error {
+  constructor() {
+    super('Processing was cancelled');
+    this.name = 'ProcessCancelledError';
+  }
+}
+
+// Result type for processVideoFileWithContext
+export interface ProcessingHandle {
+  promise: Promise<void>;
+  cancel: () => void;
+}
+
 export function processVideoFileWithContext(
   inputPath: string,
   outputDirectory: string,
   config: BatchProcessConfig,
   context: RuntimeContext,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   return new Promise(async (resolve, reject) => {
+    let isCancelled = false;
+    
+    // Check if already aborted
+    if (abortSignal?.aborted) {
+      reject(new ProcessCancelledError());
+      return;
+    }
     const chunkDuration = config.chunkDurationMinutes * 60; // Convert to seconds
     const inputFileName = path.basename(inputPath, path.extname(inputPath));
     // Normalize the output path to ensure proper formatting for GStreamer
@@ -289,6 +311,30 @@ export function processVideoFileWithContext(
     const gst = spawn(gstLaunchPath, args, {
       env: processEnv,
     });
+
+    // Handle abort signal for cancellation
+    if (abortSignal) {
+      const abortHandler = () => {
+        if (!isCancelled) {
+          isCancelled = true;
+          console.log('[GStreamer] Processing cancelled by user');
+          gst.kill('SIGTERM');
+          // Give it a moment, then force kill if needed
+          setTimeout(() => {
+            if (!gst.killed) {
+              gst.kill('SIGKILL');
+            }
+          }, 2000);
+        }
+      };
+      
+      abortSignal.addEventListener('abort', abortHandler, { once: true });
+      
+      // Clean up listener when process exits
+      gst.on('exit', () => {
+        abortSignal.removeEventListener('abort', abortHandler);
+      });
+    }
 
     // Progress tracking variables
     let errorOutput = "";
@@ -633,10 +679,16 @@ export function processVideoFileWithContext(
       sendProgressUpdate();
     }, 1000);
 
-    gst.on("exit", (code) => {
+    gst.on("exit", (code, signal) => {
       if (progressUpdateInterval) {
         clearInterval(progressUpdateInterval);
         progressUpdateInterval = null;
+      }
+
+      // Check if this was a cancellation
+      if (isCancelled || signal === 'SIGTERM' || signal === 'SIGKILL') {
+        reject(new ProcessCancelledError());
+        return;
       }
 
       if (code === 0 && onProgress) {

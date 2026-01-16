@@ -316,6 +316,21 @@ function VideoProcessor() {
     }
   };
 
+  const cancelProcessing = async () => {
+    try {
+      const result = await window.api.ipcRenderer.invoke(
+        "video:cancel-batch-process"
+      );
+      if (result.success) {
+        toast.info("Cancelling processing...");
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Failed to cancel: ${errorMessage}`);
+    }
+  };
+
   const toggleWatchMode = async () => {
     if (watchMode) {
       // Stop watch mode
@@ -664,23 +679,36 @@ function VideoProcessor() {
                 style={{ borderTop: "1px solid var(--color-border)" }}
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    onClick={startProcessing}
-                    disabled={!canStart}
-                    className="btn-primary flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3"
-                  >
-                    {processing && !watchMode ? (
-                      <>
-                        <SpinnerIcon />
-                        <span>Processing...</span>
-                      </>
-                    ) : (
-                      <>
-                        <PlayIcon />
-                        <span>Start Batch</span>
-                      </>
-                    )}
-                  </button>
+                  {processing && !watchMode ? (
+                    <button
+                      onClick={cancelProcessing}
+                      className="flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3 rounded-lg font-medium transition-all bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                      <span>Cancel</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={startProcessing}
+                      disabled={!canStart}
+                      className="btn-primary flex items-center justify-center gap-2 text-sm sm:text-base py-2.5 sm:py-3"
+                    >
+                      <PlayIcon />
+                      <span>Start Batch</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={toggleWatchMode}

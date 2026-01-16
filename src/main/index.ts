@@ -5,7 +5,7 @@ import icon from "../../resources/icon.png?asset";
 import * as path from "path";
 import * as fs from "fs";
 import * as chokidar from "chokidar";
-import { processVideoFile } from "./gstreamer/video-split";
+import { processVideoFile, ProcessCancelledError } from "./gstreamer/video-split";
 import { BatchProcessConfig, ProcessStatus } from "./types/types";
 
 // Watch mode state
@@ -18,6 +18,10 @@ let watchStats = {
   filesFailed: 0,
   filesQueued: 0,
 };
+
+// Batch processing cancellation state
+let batchAbortController: AbortController | null = null;
+let isBatchCancelled = false;
 
 // Supported video file extensions
 const VIDEO_EXTENSIONS = new Set([
@@ -252,6 +256,17 @@ function setupIpcHandlers(): void {
     return app.getVersion();
   });
 
+  // Cancel batch processing
+  ipcMain.handle("video:cancel-batch-process", () => {
+    if (batchAbortController) {
+      console.log("[Batch Process] Cancellation requested by user");
+      isBatchCancelled = true;
+      batchAbortController.abort();
+      return { success: true, message: "Cancellation requested" };
+    }
+    return { success: false, message: "No batch process running" };
+  });
+
   // Video processing IPC handlers
   ipcMain.handle("video:select-input-directory", async () => {
     const result = await dialog.showOpenDialog({
@@ -290,6 +305,10 @@ function setupIpcHandlers(): void {
     "video:start-batch-process",
     async (_, config: BatchProcessConfig) => {
       try {
+        // Initialize cancellation state
+        batchAbortController = new AbortController();
+        isBatchCancelled = false;
+
         // Verify directories exist
         if (!fs.existsSync(config.inputDirectory)) {
           throw new Error("Input directory does not exist");
@@ -341,6 +360,12 @@ function setupIpcHandlers(): void {
 
         // Process each file sequentially
         for (let i = 0; i < files.length; i++) {
+          // Check if cancelled before processing next file
+          if (isBatchCancelled) {
+            console.log(`[Batch Process] Cancelled after ${processedFiles} file(s)`);
+            break;
+          }
+
           const file = files[i];
           const filePath = file.path;
           const fileName = file.relativePath || file.name; // Show relative path if available
@@ -366,6 +391,8 @@ function setupIpcHandlers(): void {
               config.outputDirectory,
               config,
               (progressStatus) => {
+                // Check if cancelled during progress callback
+                if (isBatchCancelled) return;
                 // Calculate bytes processed for current file
                 const currentFileProcessedBytes =
                   (progressStatus.fileProgress / 100) * fileSize;
@@ -459,7 +486,8 @@ function setupIpcHandlers(): void {
                   fileEta: progressStatus.fileEta,
                   processingSpeed: progressStatus.processingSpeed,
                 });
-              }
+              },
+              batchAbortController?.signal
             );
 
             // After file completes, add its bytes to the total
@@ -467,6 +495,13 @@ function setupIpcHandlers(): void {
             processedFiles++;
             console.log(`Successfully processed: ${fileName}`);
           } catch (error) {
+            // Check if this was a cancellation
+            if (error instanceof ProcessCancelledError || isBatchCancelled) {
+              console.log(`[Batch Process] Processing cancelled during: ${fileName}`);
+              isBatchCancelled = true;
+              break;
+            }
+
             console.error(`Error processing ${fileName}:`, error);
             const errorMessage =
               error instanceof Error ? error.message : String(error);
@@ -503,6 +538,30 @@ function setupIpcHandlers(): void {
           }
         }
 
+        // Check if cancelled
+        if (isBatchCancelled) {
+          console.log(`[Batch Process] Cancelled. Processed: ${processedFiles}, Skipped: ${skippedFiles}`);
+          
+          sendProgressUpdate({
+            currentFile: "",
+            currentFileIndex: processedFiles,
+            totalFiles,
+            currentChunk: 0,
+            totalChunks: 0,
+            fileProgress: 0,
+            chunkProgress: 0,
+            overallProgress: Math.round((totalBytesProcessed / totalBytes) * 100),
+            status: "idle",
+            error: `Cancelled after processing ${processedFiles} file(s)`,
+          });
+
+          // Clean up
+          batchAbortController = null;
+          isBatchCancelled = false;
+          
+          return { success: false, cancelled: true, processedFiles, skippedFiles, errors };
+        }
+
         // Log summary
         console.log(
           `Batch processing complete: ${processedFiles} succeeded, ${skippedFiles} failed`
@@ -531,8 +590,16 @@ function setupIpcHandlers(): void {
           error: completionMessage,
         });
 
+        // Clean up
+        batchAbortController = null;
+        isBatchCancelled = false;
+
         return { success: true, processedFiles, skippedFiles, errors };
       } catch (error) {
+        // Clean up on error
+        batchAbortController = null;
+        isBatchCancelled = false;
+
         sendProgressUpdate({
           currentFile: "",
           currentFileIndex: 0,

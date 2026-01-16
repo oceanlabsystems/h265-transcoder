@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Select, ConfigProvider, theme } from "antd";
+import { Select, ConfigProvider, theme, Modal } from "antd";
 import { toast, Toaster } from "sonner";
 import "@renderer/assets/index.css";
 
@@ -154,6 +154,9 @@ function VideoProcessor() {
 
   // App version
   const [appVersion, setAppVersion] = useState<string>("");
+
+  // Help modal state
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
 
   useEffect(() => {
     const cleanup = window.api.ipcRenderer.on(
@@ -435,6 +438,28 @@ function VideoProcessor() {
                   <span className="hidden sm:inline">Processing</span>
                 </div>
               )}
+
+              {/* Help Button */}
+              <button
+                onClick={() => setHelpModalOpen(true)}
+                className="window-control-btn"
+                title="Help"
+                style={{ marginRight: "4px" }}
+              >
+                <svg
+                  className="w-4 h-4 sm:w-5 sm:h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </button>
 
               {/* Window Controls */}
               <button
@@ -884,7 +909,8 @@ function VideoProcessor() {
           }}
         >
           <span className="hidden sm:inline">
-            H.265/HEVC Batch Transcoder {appVersion && `v${appVersion}`} • GStreamer Pipeline •{" "}
+            H.265/HEVC Batch Transcoder {appVersion && `v${appVersion}`} •
+            GStreamer Pipeline •{" "}
             <a
               href="https://www.oceanlabsystems.com"
               target="_blank"
@@ -899,6 +925,363 @@ function VideoProcessor() {
           </span>
         </footer>
       </div>
+
+      {/* Help Modal */}
+      <Modal
+        open={helpModalOpen}
+        onCancel={() => setHelpModalOpen(false)}
+        footer={null}
+        width={600}
+        style={{ maxHeight: "80vh" }}
+        styles={{
+          content: {
+            background: "var(--color-surface)",
+            color: "var(--color-text)",
+            maxHeight: "80vh",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          },
+          body: {
+            maxHeight: "calc(80vh - 110px)",
+            overflowY: "auto",
+            padding: "16px",
+            userSelect: "text",
+            WebkitUserSelect: "text",
+            MozUserSelect: "text",
+            msUserSelect: "text",
+          },
+          header: {
+            background: "var(--color-surface)",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "12px 16px",
+          },
+        }}
+        title={
+          <h2
+            style={{
+              fontFamily: "'Outfit', sans-serif",
+              color: "var(--color-text)",
+              margin: 0,
+              fontSize: "16px",
+            }}
+          >
+            H265 Transcoder Help
+          </h2>
+        }
+      >
+        <div
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            color: "var(--color-text)",
+            lineHeight: "1.5",
+            fontSize: "12px",
+            userSelect: "text",
+            WebkitUserSelect: "text",
+            MozUserSelect: "text",
+            msUserSelect: "text",
+          }}
+        >
+          {/* Overview */}
+          <section style={{ marginBottom: "16px" }}>
+            <h3
+              style={{
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: "14px",
+                fontWeight: 600,
+                marginBottom: "8px",
+                color: "var(--color-primary)",
+              }}
+            >
+              Overview
+            </h3>
+            <p style={{ marginBottom: "8px", fontSize: "12px" }}>
+              Professional video transcoding solution that splits large video
+              files into time-based segments and transcodes to H.265 format.
+              Available as desktop GUI or headless CLI service.
+            </p>
+            <div style={{ marginTop: "8px" }}>
+              <strong style={{ fontSize: "12px" }}>Key Features:</strong>
+              <ul
+                style={{
+                  marginTop: "4px",
+                  paddingLeft: "18px",
+                  fontSize: "11px",
+                }}
+              >
+                <li>Batch process directories</li>
+                <li>Time-based chunking</li>
+                <li>
+                  Hardware acceleration (NVIDIA/Intel) or software encoding
+                </li>
+                <li>Watch Mode - Auto-process new files</li>
+                <li>Docker Support</li>
+                <li>Real-time progress tracking</li>
+              </ul>
+            </div>
+          </section>
+
+          {/* CLI Installation */}
+          <section style={{ marginBottom: "16px" }}>
+            <h3
+              style={{
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: "14px",
+                fontWeight: 600,
+                marginBottom: "8px",
+                color: "var(--color-primary)",
+              }}
+            >
+              CLI Installation (Linux)
+            </h3>
+            <p style={{ marginBottom: "6px", fontSize: "12px" }}>
+              One-line install:
+            </p>
+            <pre
+              style={{
+                background: "var(--color-surface-elevated)",
+                padding: "8px",
+                borderRadius: "6px",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                fontSize: "10px",
+                marginBottom: "8px",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                MozUserSelect: "text",
+                msUserSelect: "text",
+              }}
+            >
+              <code
+                style={{
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  MozUserSelect: "text",
+                  msUserSelect: "text",
+                }}
+              >
+                curl -fsSL
+                https://raw.githubusercontent.com/oceanlabsystems/h265-transcoder/main/scripts/install-linux.sh
+                | sudo bash
+              </code>
+            </pre>
+            <p
+              style={{
+                marginTop: "8px",
+                marginBottom: "4px",
+                fontSize: "12px",
+              }}
+            >
+              <strong>Usage:</strong>
+            </p>
+            <pre
+              style={{
+                background: "var(--color-surface-elevated)",
+                padding: "8px",
+                borderRadius: "6px",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                fontSize: "10px",
+                marginBottom: "8px",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                MozUserSelect: "text",
+                msUserSelect: "text",
+              }}
+            >
+              <code
+                style={{
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  MozUserSelect: "text",
+                  msUserSelect: "text",
+                }}
+              >
+                {`h265-transcoder-cli --input /videos/in --output /videos/out
+h265-transcoder-cli --input /videos/in --output /videos/out --watch
+h265-transcoder-cli --config /etc/h265-transcoder/config.yaml --watch`}
+              </code>
+            </pre>
+            <p
+              style={{
+                marginTop: "8px",
+                marginBottom: "4px",
+                fontSize: "12px",
+              }}
+            >
+              <strong>Service (systemd):</strong>
+            </p>
+            <pre
+              style={{
+                background: "var(--color-surface-elevated)",
+                padding: "8px",
+                borderRadius: "6px",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                fontSize: "10px",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                MozUserSelect: "text",
+                msUserSelect: "text",
+              }}
+            >
+              <code
+                style={{
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  MozUserSelect: "text",
+                  msUserSelect: "text",
+                }}
+              >
+                {`sudo systemctl enable h265-transcoder
+sudo systemctl start h265-transcoder`}
+              </code>
+            </pre>
+          </section>
+
+          {/* Docker Installation */}
+          <section style={{ marginBottom: "16px" }}>
+            <h3
+              style={{
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: "14px",
+                fontWeight: 600,
+                marginBottom: "8px",
+                color: "var(--color-primary)",
+              }}
+            >
+              Docker Installation
+            </h3>
+            <p style={{ marginBottom: "6px", fontSize: "12px" }}>
+              Quick setup:
+            </p>
+            <pre
+              style={{
+                background: "var(--color-surface-elevated)",
+                padding: "8px",
+                borderRadius: "6px",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                fontSize: "10px",
+                marginBottom: "8px",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                MozUserSelect: "text",
+                msUserSelect: "text",
+              }}
+            >
+              <code
+                style={{
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  MozUserSelect: "text",
+                  msUserSelect: "text",
+                }}
+              >
+                {`mkdir -p h265-transcoder/{input,output,config}
+cd h265-transcoder
+cat > config/config.yaml << 'EOF'
+input: /input
+output: /output
+encoder: x265
+format: mkv
+chunkDurationMinutes: 60
+watch: true
+EOF
+docker run -d --name h265-transcoder --restart unless-stopped \\
+  -v $(pwd)/input:/input:ro \\
+  -v $(pwd)/output:/output \\
+  -v $(pwd)/config:/config \\
+  oceanlabsystems/h265-transcoder:latest`}
+              </code>
+            </pre>
+            <p
+              style={{
+                marginTop: "8px",
+                marginBottom: "4px",
+                fontSize: "12px",
+              }}
+            >
+              <strong>Docker Compose:</strong>
+            </p>
+            <pre
+              style={{
+                background: "var(--color-surface-elevated)",
+                padding: "8px",
+                borderRadius: "6px",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                fontSize: "10px",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                MozUserSelect: "text",
+                msUserSelect: "text",
+              }}
+            >
+              <code
+                style={{
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  MozUserSelect: "text",
+                  msUserSelect: "text",
+                }}
+              >
+                {`curl -O https://raw.githubusercontent.com/oceanlabsystems/h265-transcoder/main/docker-compose.yml
+docker-compose up -d`}
+              </code>
+            </pre>
+          </section>
+
+          {/* Additional Info */}
+          <section>
+            <h3
+              style={{
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: "14px",
+                fontWeight: 600,
+                marginBottom: "8px",
+                color: "var(--color-primary)",
+              }}
+            >
+              Resources
+            </h3>
+            <ul
+              style={{
+                paddingLeft: "18px",
+                marginBottom: "0",
+                fontSize: "11px",
+              }}
+            >
+              <li>
+                <a
+                  href="https://github.com/oceanlabsystems/h265-transcoder"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "var(--color-primary)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  GitHub Repository
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://www.oceanlabsystems.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "var(--color-primary)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Oceanlab Systems
+                </a>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </Modal>
     </ConfigProvider>
   );
 }

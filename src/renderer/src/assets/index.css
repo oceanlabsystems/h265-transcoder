@@ -368,10 +368,56 @@
 .ant-input-number {
   background: rgba(10, 10, 15, 0.6) !important;
   border-color: var(--color-border) !important;
+  font-size: 12px !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+@media (min-width: 640px) {
+  .ant-input-number {
+    font-size: 13px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+  }
+}
+
+.ant-input-number:hover {
+  border-color: var(--color-border-bright) !important;
+}
+
+.ant-input-number-focused {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1) !important;
+}
+
+.ant-input-number-input-wrap {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  width: 100% !important;
 }
 
 .ant-input-number-input {
   font-family: "JetBrains Mono", monospace !important;
+  height: 100% !important;
+  text-align: center !important;
+  padding: 0 !important;
+  line-height: 36px !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+@media (min-width: 640px) {
+  .ant-input-number-input {
+    line-height: 40px !important;
+  }
+}
+
+.ant-input-number .ant-input-number-handler-wrap {
+  display: none !important;
 }
 
 .ant-btn {

@@ -29,8 +29,14 @@ chunkDurationMinutes: 60
 # Faster = larger files, slower = smaller files
 speedPreset: medium
 
-# Bitrate in kbps (optional, leave empty for auto)
+# Bitrate in kbps (optional, for bitrate-based encoding)
+# Leave empty to use quality-based encoding instead
 # bitrate: 8000
+
+# Quality level 0-100 (optional, for constant quality encoding)
+# Higher = better quality, larger files. Recommended: 70-85 for good quality
+# For all hardware encoders (vtenc, nvh265, qsvh265), defaults to 75 if neither bitrate nor quality is specified
+# quality: 75
 
 # Enable watch mode - required for service operation
 watch: true

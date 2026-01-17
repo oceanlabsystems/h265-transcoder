@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Select, ConfigProvider, theme, Modal, Tooltip, Spin } from "antd";
+import { Select, ConfigProvider, theme, Modal, Tooltip, Spin, InputNumber } from "antd";
 import { toast, Toaster } from "sonner";
 import "@renderer/assets/index.css";
 
@@ -158,7 +158,7 @@ interface WatchStatus {
 function VideoProcessor() {
   const [inputDir, setInputDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
-  const [chunkDuration, setChunkDuration] = useState<number>(30);
+  const [chunkDuration, setChunkDuration] = useState<number>(50);
   const [outputFormat, setOutputFormat] = useState<"mp4" | "mkv" | "mov">(
     "mkv"
   );
@@ -176,6 +176,7 @@ function VideoProcessor() {
     | "slower"
     | "veryslow"
   >("medium");
+  const [quality, setQuality] = useState<number | undefined>(60); // Default quality for hardware encoders
   const [files, setFiles] = useState<Array<{ name: string; path: string }>>([]);
   const [processing, setProcessing] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -212,53 +213,64 @@ function VideoProcessor() {
   // Help modal state
   const [helpModalOpen, setHelpModalOpen] = useState(false);
 
+  // Encoder detection function (reusable)
+  const detectEncoders = async (showToast = true, setDefaultEncoder = false) => {
+    setDetectingEncoders(true);
+    try {
+      const result: EncoderDetectionResult =
+        await window.api.ipcRenderer.invoke("video:detect-encoders");
+      setAvailableEncoders(result.encoders);
+      setHasHardwareEncoder(result.hasHardwareEncoder);
+
+      // Set the recommended encoder as default (only on initial load)
+      if (setDefaultEncoder && result.recommended) {
+        setEncoder(result.recommended);
+      }
+
+      // Show toast if hardware encoder was detected
+      if (showToast && result.hasHardwareEncoder) {
+        const hwEncoder = result.encoders.find(
+          (e) => e.recommended && e.id !== "x265"
+        );
+        if (hwEncoder) {
+          toast.success(`Hardware encoder detected: ${hwEncoder.name}`, {
+            duration: 3000,
+          });
+        }
+      } else if (showToast) {
+        toast.success("Encoders rescanned successfully", {
+          duration: 2000,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to detect encoders:", error);
+      // Default to software encoder
+      setAvailableEncoders([
+        {
+          id: "x265",
+          name: "Software (x265)",
+          description: "CPU-based encoding",
+          gstreamerElement: "x265enc",
+          available: true,
+          recommended: true,
+          priority: 10,
+          platform: "all",
+        },
+      ]);
+      if (showToast) {
+        toast.error("Failed to detect encoders", {
+          duration: 3000,
+        });
+      }
+    } finally {
+      setDetectingEncoders(false);
+    }
+  };
+
   // Detect available encoders on mount
   useEffect(() => {
-    const detectEncoders = async () => {
-      setDetectingEncoders(true);
-      try {
-        const result: EncoderDetectionResult =
-          await window.api.ipcRenderer.invoke("video:detect-encoders");
-        setAvailableEncoders(result.encoders);
-        setHasHardwareEncoder(result.hasHardwareEncoder);
-
-        // Set the recommended encoder as default
-        if (result.recommended) {
-          setEncoder(result.recommended);
-        }
-
-        // Show toast if hardware encoder was detected
-        if (result.hasHardwareEncoder) {
-          const hwEncoder = result.encoders.find(
-            (e) => e.recommended && e.id !== "x265"
-          );
-          if (hwEncoder) {
-            toast.success(`Hardware encoder detected: ${hwEncoder.name}`, {
-              duration: 3000,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Failed to detect encoders:", error);
-        // Default to software encoder
-        setAvailableEncoders([
-          {
-            id: "x265",
-            name: "Software (x265)",
-            description: "CPU-based encoding",
-            gstreamerElement: "x265enc",
-            available: true,
-            recommended: true,
-            priority: 10,
-            platform: "all",
-          },
-        ]);
-      } finally {
-        setDetectingEncoders(false);
-      }
-    };
-
-    detectEncoders();
+    detectEncoders(true, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -414,7 +426,8 @@ function VideoProcessor() {
       chunkDurationMinutes: chunkDuration,
       outputFormat,
       encoder,
-      speedPreset: encoder === "x265" ? speedPreset : undefined,
+      speedPreset: undefined, // Quality setting is now used for all encoders
+      quality: encoder !== "x265" ? quality : undefined,
     };
 
     try {
@@ -467,7 +480,8 @@ function VideoProcessor() {
         chunkDurationMinutes: chunkDuration,
         outputFormat,
         encoder,
-        speedPreset: encoder === "x265" ? speedPreset : undefined,
+        speedPreset: undefined, // Quality setting is now used for all encoders
+        quality: encoder !== "x265" ? quality : undefined,
       };
 
       try {
@@ -724,17 +738,14 @@ function VideoProcessor() {
                 </div>
 
                 {/* Encoder */}
-                <div>
-                  <label className="label-text text-xs sm:text-sm mb-2 flex items-center gap-2">
-                    Encoder
-                    {hasHardwareEncoder && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30">
-                        GPU
-                      </span>
-                    )}
+                <div className="flex flex-col">
+                  <label className="label-text text-xs sm:text-sm mb-2 block min-h-[20px]">
+                    <span className="flex items-center gap-2">
+                      Encoder
+                    </span>
                   </label>
                   {detectingEncoders ? (
-                    <div className="flex items-center justify-center h-[38px] rounded-lg border border-white/10 bg-white/5">
+                    <div className="flex items-center justify-center h-[38px] sm:h-[40px] rounded-lg border border-white/10 bg-white/5">
                       <Spin size="small" />
                       <span className="ml-2 text-xs text-gray-400">
                         Detecting...
@@ -771,30 +782,24 @@ function VideoProcessor() {
                   )}
                 </div>
 
-                {/* Speed Preset - only for x265 */}
-                {encoder === "x265" ? (
-                  <div>
-                    <label className="label-text text-xs sm:text-sm mb-2 block">
-                      Preset
-                    </label>
-                    <Select
-                      value={speedPreset}
-                      onChange={setSpeedPreset}
-                      className="w-full"
-                    >
-                      <Option value="ultrafast">Ultrafast</Option>
-                      <Option value="veryfast">Veryfast</Option>
-                      <Option value="faster">Faster</Option>
-                      <Option value="fast">Fast</Option>
-                      <Option value="medium">Medium</Option>
-                      <Option value="slow">Slow</Option>
-                      <Option value="slower">Slower</Option>
-                      <Option value="veryslow">Veryslow</Option>
-                    </Select>
-                  </div>
-                ) : (
-                  <div /> /* Empty placeholder for grid alignment */
-                )}
+                {/* Quality - all encoders now use quality setting */}
+                <div className="flex flex-col">
+                  <label className="label-text text-xs sm:text-sm mb-2 block min-h-[20px]">
+                    <Tooltip title="Quality level (0-100, higher = better quality, larger files). Default: 50 for balanced quality and file size.">
+                      <span className="cursor-help">Quality</span>
+                    </Tooltip>
+                  </label>
+                  <InputNumber
+                    value={quality}
+                    onChange={(value) => setQuality(value !== null && value !== undefined ? value : 50)}
+                    min={0}
+                    max={100}
+                    className="w-full "
+                    disabled={processing}
+                    placeholder="50"
+                    controls={false}
+                  />
+                </div>
               </div>
 
               {/* Action Buttons */}
@@ -802,90 +807,128 @@ function VideoProcessor() {
                 className="pt-4 flex flex-wrap items-center gap-3"
                 style={{ borderTop: "1px solid var(--color-border)" }}
               >
-                {processing && !watchMode ? (
-                  <button
-                    onClick={cancelProcessing}
-                    className="flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                <div className="flex items-center gap-3">
+                  {processing && !watchMode ? (
+                    <button
+                      onClick={cancelProcessing}
+                      className="flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                    <span>Cancel</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={startProcessing}
-                    disabled={!canStart}
-                    className="btn-primary flex items-center justify-center gap-2 text-sm px-5 py-2.5"
-                  >
-                    <PlayIcon />
-                    <span>Start Batch</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={toggleWatchMode}
-                  disabled={!canWatch}
-                  className={`flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all ${
-                    watchMode
-                      ? "bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
-                      : "btn-secondary"
-                  }`}
-                >
-                  {watchMode ? (
-                    <>
                       <svg
                         className="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
                       >
-                        <rect
-                          x="6"
-                          y="6"
-                          width="12"
-                          height="12"
-                          rx="2"
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                           strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
                         />
                       </svg>
-                      <span>Stop Watch</span>
-                    </>
+                      <span>Cancel</span>
+                    </button>
                   ) : (
-                    <>
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                        />
-                      </svg>
-                      <span>Watch Mode</span>
-                    </>
+                    <button
+                      onClick={startProcessing}
+                      disabled={!canStart}
+                      className="btn-primary flex items-center justify-center gap-2 text-sm px-5 py-2.5"
+                    >
+                      <PlayIcon />
+                      <span>Start Batch</span>
+                    </button>
                   )}
-                </button>
+
+                  <button
+                    onClick={toggleWatchMode}
+                    disabled={!canWatch}
+                    className={`flex items-center justify-center gap-2 text-sm px-5 py-2.5 rounded-lg font-medium transition-all ${
+                      watchMode
+                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/50 hover:bg-orange-500/30"
+                        : "btn-secondary"
+                    }`}
+                  >
+                    {watchMode ? (
+                      <>
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <rect
+                            x="6"
+                            y="6"
+                            width="12"
+                            height="12"
+                            rx="2"
+                            strokeWidth={2}
+                          />
+                        </svg>
+                        <span>Stop Watch</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                          />
+                        </svg>
+                        <span>Watch Mode</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div
+                  className="ml-auto flex items-center gap-3"
+                  style={{ borderLeft: "1px solid var(--color-border)", paddingLeft: "12px" }}
+                >
+                  <button
+                    onClick={() => detectEncoders(true)}
+                    disabled={detectingEncoders || processing}
+                    className="flex items-center justify-center gap-2 text-sm px-4 py-2.5 rounded-lg font-medium transition-all bg-blue-500/20 text-blue-400 border border-blue-500/50 hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="button"
+                  >
+                    {detectingEncoders ? (
+                      <>
+                        <Spin size="small" />
+                        <span>Scanning...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                          />
+                        </svg>
+                        <span>Rescan Encoders</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
                 {/* Watch mode status - inline */}
                 {watchMode && (

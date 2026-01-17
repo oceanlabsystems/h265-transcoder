@@ -110,6 +110,7 @@ interface CliConfig {
   chunkDuration: string;
   format: 'mp4' | 'mkv' | 'mov';
   bitrate?: string;
+  quality?: string; // Quality level 0-100 (for constant quality encoding)
   speedPreset?: string;
   watch: boolean;
   processedDir?: string;
@@ -133,7 +134,8 @@ program
   .option('--encoder <type>', 'Encoder: auto, x265, nvh265, qsvh265, vtenc (auto detects best)', 'auto')
   .option('--chunk-duration <minutes>', 'Chunk duration in minutes', '60')
   .option('--format <type>', 'Output format: mp4, mkv, mov', 'mkv')
-  .option('--bitrate <kbps>', 'Target bitrate in kbps (optional)')
+  .option('--bitrate <kbps>', 'Target bitrate in kbps (optional, for bitrate-based encoding)')
+  .option('--quality <0-100>', 'Quality level 0-100 (optional, for constant quality encoding, higher = better quality)')
   .option('--speed-preset <preset>', 'Speed preset for x265: ultrafast, veryfast, faster, fast, medium, slow, slower, veryslow', 'medium')
   .option('--processed-dir <dir>', 'Move original files here after successful processing')
   .option('--failed-dir <dir>', 'Move failed files here')
@@ -159,6 +161,7 @@ async function main() {
         chunkDuration: String(fileConfig.chunkDuration || fileConfig.chunkDurationMinutes || 60),
         format: fileConfig.format || fileConfig.outputFormat,
         bitrate: fileConfig.bitrate ? String(fileConfig.bitrate) : undefined,
+        quality: fileConfig.quality ? String(fileConfig.quality) : undefined,
         speedPreset: fileConfig.speedPreset,
         watch: fileConfig.watch,
         processedDir: fileConfig.processedDir || fileConfig.processedDirectory,
@@ -182,6 +185,7 @@ async function main() {
     chunkDuration: opts.chunkDuration || config.chunkDuration || '60',
     format: opts.format || config.format || 'mkv',
     bitrate: opts.bitrate || config.bitrate,
+    quality: opts.quality || config.quality,
     speedPreset: opts.speedPreset || config.speedPreset || 'medium',
     watch: opts.watch || config.watch || false,
     processedDir: opts.processedDir || config.processedDir,
@@ -256,6 +260,7 @@ async function main() {
     outputFormat: finalConfig.format as 'mp4' | 'mkv' | 'mov',
     encoder: selectedEncoder,
     bitrate: finalConfig.bitrate ? parseInt(finalConfig.bitrate, 10) : undefined,
+    quality: finalConfig.quality ? parseInt(finalConfig.quality, 10) : undefined,
     speedPreset: finalConfig.speedPreset as any,
     watchMode: finalConfig.watch,
     processedDirectory: finalConfig.processedDir ? path.resolve(finalConfig.processedDir) : undefined,

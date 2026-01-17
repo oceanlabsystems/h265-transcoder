@@ -12,7 +12,8 @@ export interface BatchProcessConfig {
   chunkDurationMinutes: number;
   outputFormat: 'mp4' | 'mkv' | 'mov';
   encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc';
-  bitrate?: number;
+  bitrate?: number; // Target bitrate in kbps (for bitrate-based encoding)
+  quality?: number; // Quality level 0-100 (for constant quality encoding, higher = better quality)
   speedPreset?: 'ultrafast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow';
 }
 
@@ -47,6 +48,9 @@ export interface ProgressCallback {
     chunkEta?: number;
     fileEta?: number;
     processingSpeed?: number;
+    currentPositionSeconds?: number; // Current position in input stream (from GStreamer)
+    fileDuration?: number; // Total duration of input file in seconds
+    outputBytes?: number; // Total output bytes written so far (for reference)
   }): void;
 }
 

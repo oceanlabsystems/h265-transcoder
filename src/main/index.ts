@@ -452,9 +452,25 @@ function setupIpcHandlers(): void {
               (progressStatus) => {
                 // Check if cancelled during progress callback
                 if (isBatchCancelled) return;
-                // Calculate bytes processed for current file
-                const currentFileProcessedBytes =
-                  (progressStatus.fileProgress / 100) * fileSize;
+                
+                // Calculate bytes processed for current file based on GStreamer input position
+                // This is more accurate than using fileProgress percentage because it uses
+                // the actual input stream position from GStreamer's progressreport element
+                let currentFileProcessedBytes = 0;
+                if (
+                  progressStatus.currentPositionSeconds !== undefined &&
+                  progressStatus.fileDuration !== undefined &&
+                  progressStatus.currentPositionSeconds > 0 &&
+                  progressStatus.fileDuration > 0
+                ) {
+                  // Use actual position from GStreamer: (position / duration) * fileSize
+                  currentFileProcessedBytes =
+                    (progressStatus.currentPositionSeconds / progressStatus.fileDuration) * fileSize;
+                } else {
+                  // Fallback to percentage-based calculation if position data not available
+                  currentFileProcessedBytes =
+                    (progressStatus.fileProgress / 100) * fileSize;
+                }
 
                 // Calculate total bytes processed (completed files + current file progress)
                 const totalProcessedBytes =
@@ -468,34 +484,41 @@ function setupIpcHandlers(): void {
                 // Note: Detailed progress is logged by video-split.ts
                 // Only log batch-level progress here when it changes significantly
 
-                // Calculate overall ETA using industry standard formula:
-                // ETA = (remainingBytes / processedBytes) * elapsedTime
-                // This is the same formula used by FFmpeg, HandBrake, rsync, wget, etc.
+                // Calculate overall ETA
+                // PRIORITY: Use GStreamer's fileEta (based on input position) as primary source
+                // This is more accurate than byte-based calculation because it uses actual encoding progress
                 let overallEta: number | undefined;
                 const progressElapsed = (Date.now() - batchStartTime) / 1000;
 
-                // Wait for minimum data before calculating (5 seconds or some bytes processed)
-                if (totalProcessedBytes > 0 && progressElapsed > 5) {
+                // PRIMARY: Use fileEta from GStreamer when available (most accurate)
+                // This is based on actual input position and encoding speed, not file sizes
+                if (
+                  progressStatus.fileEta !== undefined &&
+                  progressStatus.fileEta > 0
+                ) {
+                  // Calculate ETA for remaining files (excluding current file, since fileEta covers it)
+                  const remainingFiles = files.length - (i + 1);
+                  let remainingFilesEta = 0;
+
+                  if (remainingFiles > 0 && progressElapsed > 5 && totalBytesProcessed > 0) {
+                    // Estimate time for remaining files based on average throughput
+                    // Exclude current file from remaining bytes since fileEta already accounts for it
+                    const remainingFilesBytes = totalBytes - totalBytesProcessed - fileSize;
+                    const averageBytesPerSecond = totalBytesProcessed / progressElapsed;
+                    if (averageBytesPerSecond > 0 && remainingFilesBytes > 0) {
+                      remainingFilesEta = Math.round(remainingFilesBytes / averageBytesPerSecond);
+                    }
+                  }
+
+                  // Overall ETA = current file ETA + remaining files ETA
+                  overallEta = progressStatus.fileEta + remainingFilesEta;
+                } else if (totalProcessedBytes > 0 && progressElapsed > 5) {
+                  // FALLBACK: Byte-based calculation when fileEta not available
                   const remainingBytes = totalBytes - totalProcessedBytes;
                   // Industry standard: ETA = remaining * (elapsed / completed)
                   overallEta = Math.round(
                     (remainingBytes / totalProcessedBytes) * progressElapsed
                   );
-                } else if (
-                  progressStatus.fileEta !== undefined &&
-                  progressStatus.fileEta > 0 &&
-                  fileSize > 0
-                ) {
-                  // Early fallback: scale current file ETA by total/current file size ratio
-                  const remainingBytes = totalBytes - totalProcessedBytes;
-                  const currentFileRemainingBytes =
-                    fileSize - currentFileProcessedBytes;
-                  if (currentFileRemainingBytes > 0) {
-                    overallEta = Math.round(
-                      progressStatus.fileEta *
-                        (remainingBytes / currentFileRemainingBytes)
-                    );
-                  }
                 }
 
                 // Calculate throughput based on total bytes processed including current file progress

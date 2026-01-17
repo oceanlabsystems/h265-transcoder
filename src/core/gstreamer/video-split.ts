@@ -359,15 +359,30 @@ export function processVideoFileWithContext(
     }
 
     // Build x265enc options for reduced buffering and better progress tracking
+    // Use CRF (Constant Rate Factor) for quality control, same as other encoders
+    // CRF range: 0-51 (lower = better quality), default CRF 28
     // key-int-max: Maximum keyframe interval (forces more frequent output)
     // rc-lookahead: Reduced lookahead frames (default is 20-40, we use 10 for faster output)
     // bframes: Reduce B-frames for faster encoding throughput
     const x265Options = [
-      config.speedPreset
-        ? `speed-preset=${config.speedPreset}`
-        : "speed-preset=medium",
-      "key-int-max=120", // Force keyframe every 120 frames (~4 sec at 30fps)
-      'option-string="rc-lookahead=10:bframes=3"', // Reduce lookahead buffer, limit B-frames
+      // Use speed-preset medium for balanced encoding speed
+      "speed-preset=medium",
+      // CRF quality mapping: 0-100 scale maps to CRF 51-0 (lower CRF = better quality, CRF 0 = lossless)
+      // Map UI quality to CRF: UI 0 → CRF 51 (worst), UI 50 → CRF 28 (balanced, x265 default), UI 100 → CRF 0 (lossless)
+      // Full range allows users to achieve lossless encoding at quality 100
+      // Using linear mapping for consistent compression ratios across the quality range
+      ...(config.quality !== undefined
+        ? (() => {
+            // Linear mapping: CRF = 51 - (quality / 100) * 51
+            // This gives: quality 0 → CRF 51, quality 50 → CRF 25.5 → 26, quality 100 → CRF 0
+            // Note: Quality 50 maps to CRF 26 (close to x265 default of 28) for balanced compression
+            const crf = Math.round(51 - (config.quality / 100) * 51);
+            return [`option-string="crf=${crf}:key-int-max=120:rc-lookahead=10:bframes=3"`];
+          })()
+        : [
+            // Default quality=50 maps to CRF 26 (balanced quality, close to x265 default of 28)
+            `option-string="crf=26:key-int-max=120:rc-lookahead=10:bframes=3"`,
+          ]),
     ];
 
     const args = [
@@ -395,8 +410,53 @@ export function processVideoFileWithContext(
       "!",
       encoder,
       ...(config.bitrate ? [`bitrate=${config.bitrate}`] : []),
+      // Hardware encoder quality settings (0-100, higher = better quality)
+      // Default to 50 if neither bitrate nor quality is specified (balanced quality and file size)
+      ...(encoder === "vtenc_h265"
+        ? (() => {
+            const vtencOptions: string[] = [];
+            if (config.quality !== undefined) {
+              vtencOptions.push(`quality=${Math.max(0, Math.min(100, config.quality))}`);
+            } else if (!config.bitrate) {
+              // Default quality when no bitrate specified
+              vtencOptions.push("quality=50");
+            }
+            return vtencOptions;
+          })()
+        : encoder === "nvh265enc"
+        ? (() => {
+            const nvencOptions: string[] = [];
+            if (config.quality !== undefined) {
+              // NVENC uses const-quality mode with quality 0-51 (lower = better quality)
+              // Map 0-100 scale to 0-51 scale (inverted: 100 quality = 0 QP, 0 quality = 51 QP)
+              const qp = Math.round(51 * (1 - config.quality / 100));
+              nvencOptions.push(`const-quality=${qp}`);
+            } else if (!config.bitrate) {
+              // Default quality=50 maps to QP ~26 (balanced quality)
+              nvencOptions.push("const-quality=26");
+            }
+            return nvencOptions;
+          })()
+        : encoder === "qsvh265enc"
+        ? (() => {
+            const qsvOptions: string[] = [];
+            if (config.quality !== undefined) {
+              // QSV uses ICQ (Intelligent Constant Quality) mode with quality 1-51 (lower = better quality)
+              // Map 0-100 scale to a practical ICQ range of 15-30 for better compression control
+              // Lower ICQ = better quality = less compression. Higher ICQ = worse quality = more compression
+              // Mapping: UI 0 → ICQ 30 (high compression), UI 50 → ICQ 18 (balanced ~10x compression), UI 100 → ICQ 15 (very high quality)
+              const icq = Math.max(15, Math.min(30, Math.round(30 - (config.quality / 100) * 15)));
+              qsvOptions.push("rate-control=icq");
+              qsvOptions.push(`icq-quality=${icq}`);
+            } else if (!config.bitrate) {
+              // Default quality=50 maps to ICQ 18 (balanced quality, ~10x compression)
+              qsvOptions.push("rate-control=icq");
+              qsvOptions.push("icq-quality=18");
+            }
+            return qsvOptions;
+          })()
+        : []),
       ...(encoder === "x265enc" ? x265Options : []),
-      ...(encoder === "qsvh265enc" ? [] : []),
       "!",
       "h265parse",
       "!",
@@ -750,6 +810,9 @@ export function processVideoFileWithContext(
         chunkEta: displayEta !== undefined ? chunkEta : undefined,
         fileEta: displayEta !== undefined ? fileEta : undefined,
         processingSpeed,
+        currentPositionSeconds: currentPositionSeconds > 0 ? currentPositionSeconds : undefined,
+        fileDuration: fileDuration > 0 ? fileDuration : undefined,
+        outputBytes: totalOutputSize > 0 ? totalOutputSize : undefined,
       });
     };
 

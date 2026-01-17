@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 /**
  * Runtime context for GStreamer path resolution
@@ -9,6 +10,7 @@ export interface RuntimeContext {
   isPackaged: boolean;
   appPath: string;       // app.getAppPath() for Electron, custom path for CLI
   resourcesPath: string; // process.resourcesPath for Electron, custom for CLI
+  userDataPath?: string; // User-writable data directory for logs/config (app.getPath('userData') for Electron)
 }
 
 export interface GStreamerPaths {
@@ -136,19 +138,84 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
       PATH: `${binPath}${path.delimiter}${process.env.PATH}`,
       GST_PLUGIN_PATH: pluginPath,
       GST_PLUGIN_SYSTEM_PATH: pluginPath,
+      // GStreamer 1.0-specific environment variables (with _1_0 suffix)
+      GST_PLUGIN_PATH_1_0: pluginPath,
+      GST_PLUGIN_SYSTEM_PATH_1_0: pluginPath,
     };
     
     if (platform === 'win32') {
       // Windows-specific environment variables
       envVars.GSTREAMER_1_0_ROOT_MSVC_X86_64 = gstRoot;
       envVars.GSTREAMER_1_0_ROOT_MSVC_X86 = gstRoot;
+      
+      // Critical: Plugin scanner path - required for gst-inspect to work
+      // Try multiple possible locations for the plugin scanner
+      const scannerCandidates = [
+        // In bin directory (some builds put it here)
+        path.join(binPath, 'gst-plugin-scanner.exe'),
+        // Relative to bin - in sibling libexec directory (standard layout)
+        path.join(path.dirname(binPath), 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner.exe'),
+        // From gstRoot with arch folder (e.g., gstreamer/x64/libexec/...)
+        path.join(gstRoot, arch === 'x64' ? 'x64' : 'x86', 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner.exe'),
+        // From gstRoot directly (e.g., gstreamer/libexec/...)
+        path.join(gstRoot, 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner.exe'),
+      ];
+      
+      for (const scannerPath of scannerCandidates) {
+        if (fs.existsSync(scannerPath)) {
+          envVars.GST_PLUGIN_SCANNER_1_0 = scannerPath;
+          envVars.GST_PLUGIN_SCANNER = scannerPath;
+          break;
+        }
+      }
+      
+      // Registry path in user's temp directory to avoid permission issues
+      const tempDir = process.env.TEMP || process.env.TMP || os.tmpdir();
+      envVars.GST_REGISTRY_1_0 = path.join(tempDir, 'gstreamer-1.0', 'registry.bin');
     } else if (platform === 'linux') {
       // Linux-specific: add library path
       envVars.LD_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.LD_LIBRARY_PATH || ''}`;
+      
+      // Plugin scanner for Linux
+      const linuxScannerCandidates = [
+        path.join(path.dirname(binPath), 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        path.join(gstRoot, 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        '/usr/libexec/gstreamer-1.0/gst-plugin-scanner',
+        '/usr/lib/gstreamer-1.0/gst-plugin-scanner',
+      ];
+      for (const scannerPath of linuxScannerCandidates) {
+        if (fs.existsSync(scannerPath)) {
+          envVars.GST_PLUGIN_SCANNER_1_0 = scannerPath;
+          envVars.GST_PLUGIN_SCANNER = scannerPath;
+          break;
+        }
+      }
+      
+      // Registry path in user's home directory
+      const homeDir = os.homedir();
+      envVars.GST_REGISTRY_1_0 = path.join(homeDir, '.cache', 'gstreamer-1.0', 'registry.bin');
     } else if (platform === 'darwin') {
       // macOS-specific: add dylib path
       envVars.DYLD_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.DYLD_LIBRARY_PATH || ''}`;
       envVars.DYLD_FALLBACK_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.DYLD_FALLBACK_LIBRARY_PATH || ''}`;
+      
+      // Plugin scanner for macOS
+      const macosScannerCandidates = [
+        path.join(path.dirname(binPath), 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        path.join(gstRoot, 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        '/Library/Frameworks/GStreamer.framework/Versions/1.0/libexec/gstreamer-1.0/gst-plugin-scanner',
+      ];
+      for (const scannerPath of macosScannerCandidates) {
+        if (fs.existsSync(scannerPath)) {
+          envVars.GST_PLUGIN_SCANNER_1_0 = scannerPath;
+          envVars.GST_PLUGIN_SCANNER = scannerPath;
+          break;
+        }
+      }
+      
+      // Registry path in user's home directory
+      const homeDir = os.homedir();
+      envVars.GST_REGISTRY_1_0 = path.join(homeDir, 'Library', 'Caches', 'gstreamer-1.0', 'registry.bin');
     }
     
     return {
@@ -228,9 +295,28 @@ export function getGstLaunchPathWithContext(context: RuntimeContext): string {
  */
 export function createCliContext(gstreamerRoot?: string): RuntimeContext {
   const root = gstreamerRoot || process.cwd();
+  
+  // Determine user data path based on platform
+  let userDataPath: string;
+  const platform = process.platform;
+  const appName = 'h265-transcoder';
+  const homeDir = os.homedir();
+  
+  if (platform === 'win32') {
+    // Windows: Use %APPDATA%
+    userDataPath = path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), appName);
+  } else if (platform === 'darwin') {
+    // macOS: Use ~/Library/Application Support
+    userDataPath = path.join(homeDir, 'Library', 'Application Support', appName);
+  } else {
+    // Linux: Use ~/.config
+    userDataPath = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config'), appName);
+  }
+  
   return {
     isPackaged: true, // CLI is always "packaged"
     appPath: root,
     resourcesPath: root,
+    userDataPath,
   };
 }

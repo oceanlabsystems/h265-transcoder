@@ -272,6 +272,7 @@ function setupIpcHandlers(): void {
         isPackaged: app.isPackaged,
         appPath: app.getAppPath(),
         resourcesPath: process.resourcesPath || app.getAppPath(),
+        userDataPath: app.getPath("userData"),
       };
 
       try {

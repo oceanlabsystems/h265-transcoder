@@ -14,6 +14,7 @@ function createElectronContext(): RuntimeContext {
     isPackaged: app.isPackaged,
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData'),
   };
 }
 

@@ -176,7 +176,7 @@ function VideoProcessor() {
     | "slower"
     | "veryslow"
   >("medium");
-  const [quality, setQuality] = useState<number | undefined>(60); // Default quality for hardware encoders
+  const [quality, setQuality] = useState<number | undefined>(50); // Default quality 
   const [files, setFiles] = useState<Array<{ name: string; path: string }>>([]);
   const [processing, setProcessing] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);

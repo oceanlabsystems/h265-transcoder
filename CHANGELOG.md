@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.2](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.1...v1.4.2) (2026-01-17)
+
+
+### Features
+
+* encoder quality tuning ([8c3198d](https://github.com/oceanlabsystems/h265-transcoder/commit/8c3198d7b02cc93989f8759bae7c182fb9169cbd))
+
 ### [1.4.1](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.0...v1.4.1) (2026-01-17)
 
 

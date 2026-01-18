@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.6](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.5...v1.4.6) (2026-01-18)
+
+
+### Features
+
+* implement debug logging and debug logfile download ([177bc88](https://github.com/oceanlabsystems/h265-transcoder/commit/177bc881ea4a1e16fd4de1d7f7141f1e14b32fae))
+
 ### [1.4.5](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.4...v1.4.5) (2026-01-18)
 
 

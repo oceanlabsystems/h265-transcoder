@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.4](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.3...v1.4.4) (2026-01-18)
+
+
+### Bug Fixes
+
+* ask user for desired compression ratio to standardise bitrate/quality across encoders. calculate input file bitrate and target bitrate based on target ratio ([fcbc88d](https://github.com/oceanlabsystems/h265-transcoder/commit/fcbc88d391f66b6f695be0a95ef6b2117fe3bfd7))
+
 ### [1.4.3](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.2...v1.4.3) (2026-01-17)
 
 ### [1.4.2](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.1...v1.4.2) (2026-01-17)

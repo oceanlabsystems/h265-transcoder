@@ -438,17 +438,34 @@ export function processVideoFileWithContext(
     let encoderArgs: string[] = [];
     
     if (encoder === "vtenc_h265") {
-      // VideoToolbox requires explicit rate-control=abr and realtime=false for bitrate to work
-      // Without rate-control=abr, bitrate is ignored or treated as a hint
-      // realtime=false prevents latency/quality constraints from overriding bitrate
+      // VideoToolbox encoder configuration
+      // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/applemedia/vtenc_h265.html
+      // 
+      // DOCUMENTED PROPERTIES:
+      // - bitrate: target bitrate in kbps (0 = auto)
+      // - data-rate-limits: "bytes_per_second,duration_seconds" - enforces data rate limit
+      // - allow-frame-reordering: enables B-frames for better compression efficiency
+      //
+      // NOTE: HandBrake achieves reliable bitrate control using ABR mode + buffer constraints.
+      // GStreamer's vtenc_h265 exposes bitrate + data-rate-limits for similar control.
+      //
+      // IMPORTANT: data-rate-limits uses BYTES per second, not kbps!
+      // Convert: kbps * 1000 bits / 8 bits per byte = bytes per second
+      
+      // Convert kbps to bytes/second for data-rate-limits
+      const bytesPerSecond = Math.round(targetBitrateKbps * 1000 / 8);
+      
       debugLogger.info(
-        `[VideoToolbox] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        `[VideoToolbox] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps), Data rate limit: ${bytesPerSecond} bytes/sec`
       );
       encoderArgs = [
         encoder,
         `bitrate=${targetBitrateKbps}`,
-        "rate-control=abr", // Average bitrate mode - required for bitrate to be meaningful
-        "realtime=false", // Disable realtime mode to allow bitrate constraints
+        // data-rate-limits: enforce data rate over 1-second intervals
+        // Format: "bytes_per_second,duration_in_seconds"
+        `data-rate-limits=${bytesPerSecond},1.0`,
+        // Enable B-frames for better compression efficiency (like HandBrake)
+        "allow-frame-reordering=true",
       ];
       debugLogger.logEncoderConfig(
         encoder,
@@ -492,20 +509,32 @@ export function processVideoFileWithContext(
     } else if (encoder === "x265enc") {
       // Software x265 - use bitrate mode (NOT CRF/CQP)
       // Important: Don't use CRF/CQP options when targeting bitrate
+      // 
+      // NOTE: x265enc has a maximum bitrate limit. Cap at 100,000 kbps (100 Mbps)
+      // to avoid "value out of range" errors. This is more than sufficient for
+      // most video encoding scenarios including 4K.
+      const x265MaxBitrate = 100000; // 100 Mbps max for x265enc
+      const x265Bitrate = Math.min(targetBitrateKbps, x265MaxBitrate);
+      
+      if (targetBitrateKbps > x265MaxBitrate) {
+        debugLogger.warn(
+          `[x265] Target bitrate ${targetBitrateKbps} kbps exceeds x265enc maximum. Capping to ${x265MaxBitrate} kbps (100 Mbps)`
+        );
+      }
+      
       debugLogger.info(
-        `[x265] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        `[x265] Compression: ${config.compressionRatio}x → Target bitrate: ${x265Bitrate} kbps (${(x265Bitrate / 1000).toFixed(2)} Mbps)`
       );
       encoderArgs = [
         encoder,
-        `bitrate=${targetBitrateKbps}`,
-        "speed-preset=medium",
-        // Bitrate-based encoding options (no CRF/CQP)
-        `option-string="key-int-max=120:rc-lookahead=10:bframes=3"`,
+        `bitrate=${x265Bitrate}`,
+        "speed-preset=veryfast",  // Faster encoding while still respecting bitrate target
+        "tune=fastdecode",        // Optimize for faster encoding/decoding
       ];
       debugLogger.logEncoderConfig(
         encoder,
         config.compressionRatio!,
-        targetBitrateKbps,
+        x265Bitrate, // Use capped bitrate in log
         inputBitrateKbps,
         encoderArgs
       );

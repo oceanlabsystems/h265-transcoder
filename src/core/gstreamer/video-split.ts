@@ -405,14 +405,61 @@ export function processVideoFileWithContext(
       fileUri = "file://" + fileUri;
     }
 
-    // x265enc options for bitrate-based encoding
-    // All encoders now use bitrate-based encoding for consistent behavior
-    const x265Options = [
-      // Use speed-preset medium for balanced encoding speed
-      "speed-preset=medium",
-      // Bitrate-based encoding with keyframe settings for better chunking
-      `option-string="key-int-max=120:rc-lookahead=10:bframes=3"`,
-    ];
+    // Build encoder-specific arguments
+    // Each encoder has different rate-control requirements for bitrate-based encoding
+    let encoderArgs: string[] = [];
+    
+    if (encoder === "vtenc_h265") {
+      // VideoToolbox requires explicit rate-control=abr and realtime=false for bitrate to work
+      // Without rate-control=abr, bitrate is ignored or treated as a hint
+      // realtime=false prevents latency/quality constraints from overriding bitrate
+      console.log(
+        `[VideoToolbox] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+      encoderArgs = [
+        encoder,
+        `bitrate=${targetBitrateKbps}`,
+        "rate-control=abr", // Average bitrate mode - required for bitrate to be meaningful
+        "realtime=false", // Disable realtime mode to allow bitrate constraints
+      ];
+    } else if (encoder === "nvh265enc") {
+      // NVIDIA NVENC - bitrate works directly with default rate control
+      console.log(
+        `[NVENC] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+      encoderArgs = [
+        encoder,
+        `bitrate=${targetBitrateKbps}`,
+      ];
+    } else if (encoder === "qsvh265enc") {
+      // Intel Quick Sync - bitrate works directly with default rate control
+      console.log(
+        `[QSV] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+      encoderArgs = [
+        encoder,
+        `bitrate=${targetBitrateKbps}`,
+      ];
+    } else if (encoder === "x265enc") {
+      // Software x265 - use bitrate mode (NOT CRF/CQP)
+      // Important: Don't use CRF/CQP options when targeting bitrate
+      console.log(
+        `[x265] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+      encoderArgs = [
+        encoder,
+        `bitrate=${targetBitrateKbps}`,
+        "speed-preset=medium",
+        // Bitrate-based encoding options (no CRF/CQP)
+        `option-string="key-int-max=120:rc-lookahead=10:bframes=3"`,
+      ];
+    } else {
+      // Fallback for unknown encoders
+      encoderArgs = [
+        encoder,
+        `bitrate=${targetBitrateKbps}`,
+      ];
+    }
 
     const args = [
       "uridecodebin",
@@ -437,12 +484,8 @@ export function processVideoFileWithContext(
         ? ["video/x-raw,format=NV12"]
         : ["video/x-raw,format=I420"]),
       "!",
-      encoder,
-      // All encoders use bitrate-based encoding for consistent compression ratio behavior
-      // This ensures 2x compression means 50% bitrate regardless of encoder (NVIDIA, Apple, Intel, Software)
-      `bitrate=${targetBitrateKbps}`,
-      // x265enc additional options for bitrate-based encoding
-      ...(encoder === "x265enc" ? x265Options : []),
+      // Use encoder-specific arguments
+      ...encoderArgs,
       "!",
       "h265parse",
       "!",

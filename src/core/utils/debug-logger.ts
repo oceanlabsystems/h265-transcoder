@@ -9,14 +9,12 @@ class DebugLogger {
   private enabled: boolean = false;
   private logDir: string | null = null;
   private logFile: string | null = null;
-  private context: RuntimeContext | null = null;
 
   /**
    * Initialize the debug logger
    * Creates/overwrites log file on each launch
    */
   initialize(context: RuntimeContext): void {
-    this.context = context;
     this.logDir = context.userDataPath || process.cwd();
     
     try {

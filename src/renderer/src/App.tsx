@@ -158,7 +158,7 @@ interface WatchStatus {
 function VideoProcessor() {
   const [inputDir, setInputDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
-  const [chunkDuration, setChunkDuration] = useState<number>(50);
+  const [chunkDuration, setChunkDuration] = useState<number>(60);
   const [outputFormat, setOutputFormat] = useState<"mp4" | "mkv" | "mov">(
     "mkv"
   );
@@ -176,7 +176,7 @@ function VideoProcessor() {
     | "slower"
     | "veryslow"
   >("medium");
-  const [quality, setQuality] = useState<number | undefined>(50); // Default quality 
+  const [compressionRatio, setCompressionRatio] = useState<number>(2); // Default 2x compression 
   const [files, setFiles] = useState<Array<{ name: string; path: string }>>([]);
   const [processing, setProcessing] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -426,8 +426,8 @@ function VideoProcessor() {
       chunkDurationMinutes: chunkDuration,
       outputFormat,
       encoder,
-      speedPreset: undefined, // Quality setting is now used for all encoders
-      quality: encoder !== "x265" ? quality : undefined,
+      speedPreset: undefined,
+      compressionRatio,
     };
 
     try {
@@ -480,8 +480,8 @@ function VideoProcessor() {
         chunkDurationMinutes: chunkDuration,
         outputFormat,
         encoder,
-        speedPreset: undefined, // Quality setting is now used for all encoders
-        quality: encoder !== "x265" ? quality : undefined,
+        speedPreset: undefined,
+        compressionRatio,
       };
 
       try {
@@ -782,23 +782,27 @@ function VideoProcessor() {
                   )}
                 </div>
 
-                {/* Quality - all encoders now use quality setting */}
+                {/* Compression Ratio */}
                 <div className="flex flex-col">
                   <label className="label-text text-xs sm:text-sm mb-2 block min-h-[20px]">
-                    <Tooltip title="Quality level (0-100, higher = better quality, larger files). Default: 50 for balanced quality and file size.">
-                      <span className="cursor-help">Quality</span>
+                    <Tooltip title="Target compression ratio. 2x means output will be half the size (e.g., 80GB → 40GB). Higher ratios = smaller files but lower quality.">
+                      <span className="cursor-help">Compression Ratio</span>
                     </Tooltip>
                   </label>
-                  <InputNumber
-                    value={quality}
-                    onChange={(value) => setQuality(value !== null && value !== undefined ? value : 50)}
-                    min={0}
-                    max={100}
-                    className="w-full "
+                  <Select
+                    value={compressionRatio}
+                    onChange={(value) => setCompressionRatio(value)}
+                    className="w-full"
                     disabled={processing}
-                    placeholder="50"
-                    controls={false}
-                  />
+                  >
+                    <Option value={1}>1x (No compression)</Option>
+                    <Option value={2}>2x (Half size)</Option>
+                    <Option value={3}>3x</Option>
+                    <Option value={4}>4x</Option>
+                    <Option value={5}>5x (5x smaller)</Option>
+                    <Option value={10}>10x</Option>
+                    <Option value={20}>20x (Maximum compression)</Option>
+                  </Select>
                 </div>
               </div>
 

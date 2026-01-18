@@ -323,6 +323,53 @@ export function processVideoFileWithContext(
       }
     }
 
+    // Calculate input bitrate for compression ratio-based encoding
+    // This allows users to specify desired compression (e.g., 2x = 50% of input bitrate)
+    let inputBitrateKbps: number | undefined = undefined;
+    if (fileDuration > 0 && inputFileSize > 0) {
+      // Calculate input bitrate: (fileSizeBytes * 8 bits) / durationSeconds / 1000 = kbps
+      const inputBitrateBps = (inputFileSize * 8) / fileDuration;
+      inputBitrateKbps = inputBitrateBps / 1000; // Convert to kbps
+      console.log(
+        `[Video Info] Input bitrate: ${inputBitrateKbps.toFixed(0)} kbps (${(inputBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+    }
+
+    // Validate compression ratio was provided
+    if (config.compressionRatio === undefined) {
+      throw new Error(
+        "Compression ratio is required. Please specify a compression ratio (1, 2, 3, 4, 5, 10, or 20)."
+      );
+    }
+
+    // Calculate target bitrate from compression ratio
+    // Compression ratio: 2x means output is 1/2 the size (50% bitrate), 10x means 1/10 the size (10% bitrate)
+    const compressionRatio = config.compressionRatio;
+    let targetBitrateKbps: number;
+    
+    if (inputBitrateKbps !== undefined) {
+      // Calculate target bitrate from input bitrate
+      targetBitrateKbps = Math.round(inputBitrateKbps / compressionRatio);
+      
+      const estimatedOutputSizeGB = inputFileSize / compressionRatio / (1024 * 1024 * 1024);
+      const estimatedOutputSizePerHour = fileDuration > 0 ? (estimatedOutputSizeGB * 3600) / fileDuration : 0;
+      
+      console.log(
+        `[Compression] Target: ${compressionRatio}x compression → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+      );
+      console.log(
+        `[Compression] Estimated output: ${estimatedOutputSizeGB.toFixed(2)}GB (${estimatedOutputSizePerHour.toFixed(1)}GB/hour)`
+      );
+    } else {
+      // Compression ratio specified but can't calculate input bitrate - use fallback
+      // Fallback: assume input is ~20 Mbps (typical for high-quality video), then apply compression
+      const assumedInputBitrateKbps = 20000;
+      targetBitrateKbps = Math.round(assumedInputBitrateKbps / compressionRatio);
+      console.warn(
+        `[Compression] Could not determine input bitrate, using fallback. ${compressionRatio}x compression → ${targetBitrateKbps} kbps`
+      );
+    }
+
     // Determine muxer based on output format
     let muxer = "qtmux"; // qtmux for MP4 (buffers until completion)
     if (config.outputFormat === "mkv") {
@@ -358,31 +405,13 @@ export function processVideoFileWithContext(
       fileUri = "file://" + fileUri;
     }
 
-    // Build x265enc options for reduced buffering and better progress tracking
-    // Use CRF (Constant Rate Factor) for quality control, same as other encoders
-    // CRF range: 0-51 (lower = better quality), default CRF 28
-    // key-int-max: Maximum keyframe interval (forces more frequent output)
-    // rc-lookahead: Reduced lookahead frames (default is 20-40, we use 10 for faster output)
-    // bframes: Reduce B-frames for faster encoding throughput
+    // x265enc options for bitrate-based encoding
+    // All encoders now use bitrate-based encoding for consistent behavior
     const x265Options = [
       // Use speed-preset medium for balanced encoding speed
       "speed-preset=medium",
-      // CRF quality mapping: 0-100 scale maps to CRF 51-0 (lower CRF = better quality, CRF 0 = lossless)
-      // Map UI quality to CRF: UI 0 → CRF 51 (worst), UI 50 → CRF 28 (balanced, x265 default), UI 100 → CRF 0 (lossless)
-      // Full range allows users to achieve lossless encoding at quality 100
-      // Using linear mapping for consistent compression ratios across the quality range
-      ...(config.quality !== undefined
-        ? (() => {
-            // Linear mapping: CRF = 51 - (quality / 100) * 51
-            // This gives: quality 0 → CRF 51, quality 50 → CRF 25.5 → 26, quality 100 → CRF 0
-            // Note: Quality 50 maps to CRF 26 (close to x265 default of 28) for balanced compression
-            const crf = Math.round(51 - (config.quality / 100) * 51);
-            return [`option-string="crf=${crf}:key-int-max=120:rc-lookahead=10:bframes=3"`];
-          })()
-        : [
-            // Default quality=50 maps to CRF 26 (balanced quality, close to x265 default of 28)
-            `option-string="crf=26:key-int-max=120:rc-lookahead=10:bframes=3"`,
-          ]),
+      // Bitrate-based encoding with keyframe settings for better chunking
+      `option-string="key-int-max=120:rc-lookahead=10:bframes=3"`,
     ];
 
     const args = [
@@ -409,53 +438,10 @@ export function processVideoFileWithContext(
         : ["video/x-raw,format=I420"]),
       "!",
       encoder,
-      ...(config.bitrate ? [`bitrate=${config.bitrate}`] : []),
-      // Hardware encoder quality settings (0-100, higher = better quality)
-      // Default to 50 if neither bitrate nor quality is specified (balanced quality and file size)
-      ...(encoder === "vtenc_h265"
-        ? (() => {
-            const vtencOptions: string[] = [];
-            if (config.quality !== undefined) {
-              vtencOptions.push(`quality=${Math.max(0, Math.min(100, config.quality))}`);
-            } else if (!config.bitrate) {
-              // Default quality when no bitrate specified
-              vtencOptions.push("quality=50");
-            }
-            return vtencOptions;
-          })()
-        : encoder === "nvh265enc"
-        ? (() => {
-            const nvencOptions: string[] = [];
-            if (config.quality !== undefined) {
-              // NVENC uses const-quality mode with quality 0-51 (lower = better quality)
-              // Map 0-100 scale to 0-51 scale (inverted: 100 quality = 0 QP, 0 quality = 51 QP)
-              const qp = Math.round(51 * (1 - config.quality / 100));
-              nvencOptions.push(`const-quality=${qp}`);
-            } else if (!config.bitrate) {
-              // Default quality=50 maps to QP ~26 (balanced quality)
-              nvencOptions.push("const-quality=26");
-            }
-            return nvencOptions;
-          })()
-        : encoder === "qsvh265enc"
-        ? (() => {
-            const qsvOptions: string[] = [];
-            if (config.quality !== undefined) {
-              // QSV uses ICQ (Intelligent Constant Quality) mode with quality 1-51 (lower = better quality)
-              // Map 0-100 scale to a practical ICQ range of 15-30 for better compression control
-              // Lower ICQ = better quality = less compression. Higher ICQ = worse quality = more compression
-              // Mapping: UI 0 → ICQ 30 (high compression), UI 50 → ICQ 18 (balanced ~10x compression), UI 100 → ICQ 15 (very high quality)
-              const icq = Math.max(15, Math.min(30, Math.round(30 - (config.quality / 100) * 15)));
-              qsvOptions.push("rate-control=icq");
-              qsvOptions.push(`icq-quality=${icq}`);
-            } else if (!config.bitrate) {
-              // Default quality=50 maps to ICQ 18 (balanced quality, ~10x compression)
-              qsvOptions.push("rate-control=icq");
-              qsvOptions.push("icq-quality=18");
-            }
-            return qsvOptions;
-          })()
-        : []),
+      // All encoders use bitrate-based encoding for consistent compression ratio behavior
+      // This ensures 2x compression means 50% bitrate regardless of encoder (NVIDIA, Apple, Intel, Software)
+      `bitrate=${targetBitrateKbps}`,
+      // x265enc additional options for bitrate-based encoding
       ...(encoder === "x265enc" ? x265Options : []),
       "!",
       "h265parse",

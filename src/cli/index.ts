@@ -109,8 +109,7 @@ interface CliConfig {
   encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc' | 'auto';
   chunkDuration: string;
   format: 'mp4' | 'mkv' | 'mov';
-  bitrate?: string;
-  quality?: string; // Quality level 0-100 (for constant quality encoding)
+  compressionRatio?: string; // Compression ratio: 1, 2, 3, 4, 5, 10, 20
   speedPreset?: string;
   watch: boolean;
   processedDir?: string;
@@ -134,8 +133,7 @@ program
   .option('--encoder <type>', 'Encoder: auto, x265, nvh265, qsvh265, vtenc (auto detects best)', 'auto')
   .option('--chunk-duration <minutes>', 'Chunk duration in minutes', '60')
   .option('--format <type>', 'Output format: mp4, mkv, mov', 'mkv')
-  .option('--bitrate <kbps>', 'Target bitrate in kbps (optional, for bitrate-based encoding)')
-  .option('--quality <0-100>', 'Quality level 0-100 (optional, for constant quality encoding, higher = better quality)')
+  .option('--compression-ratio <ratio>', 'Target compression ratio: 1, 2, 3, 4, 5, 10, 20 (2x = half size, recommended)', '2')
   .option('--speed-preset <preset>', 'Speed preset for x265: ultrafast, veryfast, faster, fast, medium, slow, slower, veryslow', 'medium')
   .option('--processed-dir <dir>', 'Move original files here after successful processing')
   .option('--failed-dir <dir>', 'Move failed files here')
@@ -160,8 +158,7 @@ async function main() {
         encoder: fileConfig.encoder,
         chunkDuration: String(fileConfig.chunkDuration || fileConfig.chunkDurationMinutes || 60),
         format: fileConfig.format || fileConfig.outputFormat,
-        bitrate: fileConfig.bitrate ? String(fileConfig.bitrate) : undefined,
-        quality: fileConfig.quality ? String(fileConfig.quality) : undefined,
+        compressionRatio: fileConfig.compressionRatio ? String(fileConfig.compressionRatio) : undefined,
         speedPreset: fileConfig.speedPreset,
         watch: fileConfig.watch,
         processedDir: fileConfig.processedDir || fileConfig.processedDirectory,
@@ -184,8 +181,7 @@ async function main() {
     encoder: opts.encoder || config.encoder || 'x265',
     chunkDuration: opts.chunkDuration || config.chunkDuration || '60',
     format: opts.format || config.format || 'mkv',
-    bitrate: opts.bitrate || config.bitrate,
-    quality: opts.quality || config.quality,
+    compressionRatio: opts.compressionRatio || config.compressionRatio || '2',
     speedPreset: opts.speedPreset || config.speedPreset || 'medium',
     watch: opts.watch || config.watch || false,
     processedDir: opts.processedDir || config.processedDir,
@@ -252,6 +248,17 @@ async function main() {
     }
   }
 
+  // Validate compression ratio
+  const compressionRatio = finalConfig.compressionRatio 
+    ? parseFloat(finalConfig.compressionRatio) 
+    : 2; // Default to 2x
+  
+  const validCompressionRatios = [1, 2, 3, 4, 5, 10, 20];
+  if (!validCompressionRatios.includes(compressionRatio)) {
+    console.error(`Error: Invalid compression ratio. Must be one of: ${validCompressionRatios.join(', ')}`);
+    process.exit(1);
+  }
+
   // Create watch config
   const watchConfig: WatchConfig = {
     inputDirectory: path.resolve(finalConfig.input),
@@ -259,8 +266,7 @@ async function main() {
     chunkDurationMinutes: parseInt(finalConfig.chunkDuration, 10),
     outputFormat: finalConfig.format as 'mp4' | 'mkv' | 'mov',
     encoder: selectedEncoder,
-    bitrate: finalConfig.bitrate ? parseInt(finalConfig.bitrate, 10) : undefined,
-    quality: finalConfig.quality ? parseInt(finalConfig.quality, 10) : undefined,
+    compressionRatio,
     speedPreset: finalConfig.speedPreset as any,
     watchMode: finalConfig.watch,
     processedDirectory: finalConfig.processedDir ? path.resolve(finalConfig.processedDir) : undefined,
@@ -273,13 +279,14 @@ async function main() {
   console.log('║              H265 Transcoder CLI Service                     ║');
   console.log('╚══════════════════════════════════════════════════════════════╝');
   console.log('');
-  console.log(`  Input:       ${watchConfig.inputDirectory}`);
-  console.log(`  Output:      ${watchConfig.outputDirectory}`);
-  console.log(`  Encoder:     ${watchConfig.encoder}`);
-  console.log(`  Format:      ${watchConfig.outputFormat}`);
-  console.log(`  Chunk:       ${watchConfig.chunkDurationMinutes} minutes`);
-  console.log(`  Concurrency: ${watchConfig.concurrency}`);
-  console.log(`  Watch Mode:  ${watchConfig.watchMode ? 'Enabled' : 'Disabled'}`);
+  console.log(`  Input:            ${watchConfig.inputDirectory}`);
+  console.log(`  Output:           ${watchConfig.outputDirectory}`);
+  console.log(`  Encoder:           ${watchConfig.encoder}`);
+  console.log(`  Format:            ${watchConfig.outputFormat}`);
+  console.log(`  Compression:       ${watchConfig.compressionRatio}x`);
+  console.log(`  Chunk:              ${watchConfig.chunkDurationMinutes} minutes`);
+  console.log(`  Concurrency:        ${watchConfig.concurrency}`);
+  console.log(`  Watch Mode:         ${watchConfig.watchMode ? 'Enabled' : 'Disabled'}`);
   if (watchConfig.processedDirectory) {
     console.log(`  Processed:   ${watchConfig.processedDirectory}`);
   }

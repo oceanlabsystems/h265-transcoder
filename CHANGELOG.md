@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.9](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.8...v1.4.9) (2026-01-18)
+
+
+### Bug Fixes
+
+* **vtenc:** map target compression ratio to quality setting to work around apple ignorance of target bitrate ([708903b](https://github.com/oceanlabsystems/h265-transcoder/commit/708903b323b2542bf16a7a86e6f138ac3be9a845))
+
 ### [1.4.8](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.7...v1.4.8) (2026-01-18)
 
 

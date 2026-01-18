@@ -457,11 +457,11 @@ export function processVideoFileWithContext(
       //   20x compression → quality 0.22 (lower quality)
       
       const compressionRatio = config.compressionRatio!;
-      // Map compression ratio to quality using a conservative linear relationship
-      // VideoToolbox's quality setting has a steep impact on file size
-      // This gentler curve should produce compression ratios closer to target
-      // Based on empirical testing: quality 0.707 → ~18x compression for ProRes input
-      const qualityValue = Math.max(0.5, 1.0 - (compressionRatio - 1) * 0.025);
+      // Map compression ratio to quality based on empirical testing:
+      // - quality 0.975 → ~0.55x compression (files grow larger than input!)
+      // - quality 0.707 → ~18x compression (too aggressive)
+      // Target: quality ~0.82 for 2x compression from ProRes 422 input
+      const qualityValue = Math.max(0.5, 0.90 - (compressionRatio - 1) * 0.08);
       
       debugLogger.info(
         `[VideoToolbox] Compression: ${compressionRatio}x → Quality: ${qualityValue.toFixed(3)} (target bitrate would be: ${targetBitrateKbps} kbps)`

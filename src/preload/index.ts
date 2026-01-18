@@ -20,6 +20,13 @@ const api = {
         "window:maximize",
         "window:is-maximized",
         "app:get-version",
+        // Debug logging
+        "debug:set-enabled",
+        "debug:get-enabled",
+        "debug:get-log-path",
+        "debug:get-log-files",
+        "debug:read-log-file",
+        "debug:download-log-file",
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);

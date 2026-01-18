@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Select, ConfigProvider, theme, Modal, Tooltip, Spin, InputNumber } from "antd";
+import { Select, ConfigProvider, theme, Modal, Tooltip, Spin, InputNumber, Switch, Button } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 import { toast, Toaster } from "sonner";
 import "@renderer/assets/index.css";
 
@@ -197,6 +198,7 @@ function VideoProcessor() {
   const [totalBytes, setTotalBytes] = useState<number>(0);
   const [throughputBps, setThroughputBps] = useState<number>(0);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [debugLoggingEnabled, setDebugLoggingEnabled] = useState<boolean>(false);
 
   // Watch mode state
   const [watchMode, setWatchMode] = useState(false);
@@ -271,6 +273,16 @@ function VideoProcessor() {
   useEffect(() => {
     detectEncoders(true, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Get initial debug logging state
+    window.api.ipcRenderer
+      .invoke("debug:get-enabled")
+      .then((result) => setDebugLoggingEnabled(result.enabled))
+      .catch(() => {
+        // Ignore errors if debug API is not available
+      });
   }, []);
 
   useEffect(() => {
@@ -1119,18 +1131,71 @@ function VideoProcessor() {
 
         {/* Footer */}
         <footer
-          className="flex-shrink-0 px-4 sm:px-6 py-2.5 sm:py-3 text-center text-xs sm:text-sm border-t"
+          className="flex-shrink-0 px-4 sm:px-6 py-2.5 sm:py-3 border-t flex items-center justify-between"
           style={{
             borderColor: "var(--color-border)",
             color: "var(--color-text-muted)",
           }}
         >
-          <span className="hidden sm:inline">
-            H.265/HEVC Batch Transcoder • {appVersion && `v${appVersion}`}
-          </span>
-          <span className="sm:hidden">
-            H.265 Transcoder • {appVersion && `v${appVersion}`}
-          </span>
+          <div className="flex items-center gap-3">
+            <Tooltip title="Enable detailed debug logging to file">
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm">Debug Logging:</span>
+                <Switch
+                  checked={debugLoggingEnabled}
+                  onChange={async (checked) => {
+                    try {
+                      await window.api.ipcRenderer.invoke("debug:set-enabled", checked);
+                      setDebugLoggingEnabled(checked);
+                      toast.success(checked ? "Debug logging enabled" : "Debug logging disabled");
+                    } catch (error) {
+                      toast.error("Failed to toggle debug logging");
+                    }
+                  }}
+                  size="small"
+                />
+              </div>
+            </Tooltip>
+            {debugLoggingEnabled && (
+              <Button
+                type="text"
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={async () => {
+                  try {
+                    const { logFiles } = await window.api.ipcRenderer.invoke("debug:get-log-files");
+                    if (logFiles.length === 0) {
+                      toast.info("No log files available yet");
+                      return;
+                    }
+                    // Download the most recent log file
+                    const result = await window.api.ipcRenderer.invoke(
+                      "debug:download-log-file",
+                      logFiles[0]
+                    );
+                    if (result.success) {
+                      toast.success("Log file downloaded");
+                    } else if (!result.canceled) {
+                      toast.error(result.error || "Failed to download log file");
+                    }
+                  } catch (error) {
+                    toast.error("Failed to download log file");
+                  }
+                }}
+                className="text-xs"
+              >
+                Download Logs
+              </Button>
+            )}
+          </div>
+          <div className="text-center text-xs sm:text-sm">
+            <span className="hidden sm:inline">
+              H.265/HEVC Batch Transcoder • {appVersion && `v${appVersion}`}
+            </span>
+            <span className="sm:hidden">
+              H.265 Transcoder • {appVersion && `v${appVersion}`}
+            </span>
+          </div>
         </footer>
       </div>
 

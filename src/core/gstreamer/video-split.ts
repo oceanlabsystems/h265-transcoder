@@ -7,6 +7,7 @@ import {
   getGStreamerPathWithContext,
   getGstLaunchPathWithContext,
 } from "../utils/gstreamer-path";
+import { debugLogger } from "../utils/debug-logger";
 
 // Helper function to format time in seconds to readable format
 function formatTime(seconds: number): string {
@@ -50,7 +51,7 @@ function tryFfprobeDuration(inputPath: string): Promise<number | null> {
       if (code === 0) {
         const duration = parseFloat(output.trim());
         if (!isNaN(duration) && duration > 0) {
-          console.log(`[Duration] Got duration from ffprobe: ${duration}s`);
+          debugLogger.info(`[Duration] Got duration from ffprobe: ${duration}s`);
           resolve(duration);
           return;
         }
@@ -96,10 +97,10 @@ export function getVideoDurationWithContext(
     // Check if gst-discoverer exists
     const discovererExists = fs.existsSync(discovererPath);
     if (!discovererExists) {
-      console.warn(
+      debugLogger.warn(
         `[Duration] gst-discoverer-1.0 not found at: ${discovererPath}`
       );
-      console.warn(
+      debugLogger.warn(
         `[Duration] Trying ffprobe fallback... (install full GStreamer for best accuracy)`
       );
 
@@ -134,7 +135,7 @@ export function getVideoDurationWithContext(
     discoverer.on("exit", async (code) => {
       if (code === 0) {
         // Log full output for debugging
-        console.log(`[Duration Discovery] Output: ${output.substring(0, 500)}`);
+        debugLogger.info(`[Duration Discovery] Output: ${output.substring(0, 500)}`);
 
         // Parse duration from output (format: "Duration: 0:01:23.456" or "Duration: 01:23:45.678")
         const durationMatch = output.match(
@@ -151,7 +152,7 @@ export function getVideoDurationWithContext(
             const stats = fs.statSync(inputPath);
             const fileSizeGB = stats.size / (1024 * 1024 * 1024);
             if (fileSizeGB > 10 && totalSeconds < 60) {
-              console.warn(
+              debugLogger.warn(
                 `[Duration Warning] File size is ${fileSizeGB.toFixed(2)}GB but duration is only ${totalSeconds}s. ` +
                   `This seems incorrect - duration detection may have failed.`
               );
@@ -185,7 +186,7 @@ export function getVideoDurationWithContext(
         }
       } else {
         // gst-discoverer failed - try ffprobe fallback
-        console.warn(
+        debugLogger.warn(
           `[Duration] gst-discoverer failed with code ${code}, trying ffprobe...`
         );
         const ffprobeDuration = await tryFfprobeDuration(inputPath);
@@ -204,7 +205,7 @@ export function getVideoDurationWithContext(
 
     discoverer.on("error", async (error) => {
       // gst-discoverer spawn failed - try ffprobe fallback
-      console.warn(`[Duration] gst-discoverer error: ${error.message}`);
+      debugLogger.warn(`[Duration] gst-discoverer error: ${error.message}`);
       const ffprobeDuration = await tryFfprobeDuration(inputPath);
       if (ffprobeDuration !== null) {
         resolve(ffprobeDuration);
@@ -238,6 +239,11 @@ export function processVideoFileWithContext(
   abortSignal?: AbortSignal
 ): Promise<void> {
   return new Promise(async (resolve, reject) => {
+    // Initialize debug logger if not already initialized
+    if (!debugLogger.getLogFilePath()) {
+      debugLogger.initialize(context);
+    }
+
     let isCancelled = false;
 
     // Check if already aborted
@@ -257,7 +263,7 @@ export function processVideoFileWithContext(
         fs.mkdirSync(normalizedOutputDir, { recursive: true });
       }
     } catch (e) {
-      console.warn(`Could not create output directory: ${e}`);
+      debugLogger.warn(`Could not create output directory: ${e}`);
     }
 
     // Get video duration to calculate total chunks
@@ -270,8 +276,10 @@ export function processVideoFileWithContext(
     try {
       const stats = fs.statSync(inputPath);
       inputFileSize = stats.size;
+      debugLogger.logFileInfo(inputPath, inputFileSize);
     } catch (e) {
       // Ignore errors getting file size
+      debugLogger.log("ERROR", `Failed to get file size: ${e}`);
     }
 
     try {
@@ -280,7 +288,7 @@ export function processVideoFileWithContext(
       // Sanity check: if file is very large (>10GB) but duration is very short (<1 minute),
       // the duration detection likely failed - estimate from file size instead
       if (inputFileSize > 10 * 1024 * 1024 * 1024 && fileDuration < 60) {
-        console.warn(
+        debugLogger.warn(
           `[Video Info] Duration detection seems incorrect (${fileDuration}s for ${(inputFileSize / (1024 * 1024 * 1024)).toFixed(2)}GB file). ` +
             `Estimating duration from file size...`
         );
@@ -291,20 +299,21 @@ export function processVideoFileWithContext(
           (inputFileSize * 8) / (estimatedBitrateMbps * 1000000); // seconds
         fileDuration = estimatedDuration;
         durationIsEstimated = true;
-        console.log(
+        debugLogger.info(
           `[Video Info] Estimated duration: ${Math.round(fileDuration)}s (${Math.round(fileDuration / 60)} minutes)`
         );
       }
 
       totalChunks = Math.ceil(fileDuration / chunkDuration);
-      console.log(
+      debugLogger.info(
         `[Video Info] Duration: ${fileDuration}s (${Math.round(fileDuration / 60)} min), ` +
           `File size: ${(inputFileSize / (1024 * 1024 * 1024)).toFixed(2)}GB, ` +
           `Will create ${totalChunks} chunk(s)` +
           (durationIsEstimated ? " (estimated)" : "")
       );
+      debugLogger.logFileInfo(inputPath, inputFileSize, fileDuration);
     } catch (error) {
-      console.warn(`[Video Info] Could not get duration: ${error}`);
+      debugLogger.warn(`[Video Info] Could not get duration: ${error}`);
       durationIsEstimated = true;
       // If we have file size, estimate duration
       if (inputFileSize > 0) {
@@ -313,7 +322,7 @@ export function processVideoFileWithContext(
           (inputFileSize * 8) / (estimatedBitrateMbps * 1000000);
         fileDuration = estimatedDuration;
         totalChunks = Math.ceil(fileDuration / chunkDuration);
-        console.log(
+        debugLogger.info(
           `[Video Info] Estimated duration from file size: ${Math.round(fileDuration)}s, ` +
             `Will create ${totalChunks} chunk(s)`
         );
@@ -330,9 +339,15 @@ export function processVideoFileWithContext(
       // Calculate input bitrate: (fileSizeBytes * 8 bits) / durationSeconds / 1000 = kbps
       const inputBitrateBps = (inputFileSize * 8) / fileDuration;
       inputBitrateKbps = inputBitrateBps / 1000; // Convert to kbps
-      console.log(
+      debugLogger.info(
         `[Video Info] Input bitrate: ${inputBitrateKbps.toFixed(0)} kbps (${(inputBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
+      debugLogger.log("BITRATE_CALC", "Input bitrate calculated", {
+        inputBitrateKbps: inputBitrateKbps.toFixed(0),
+        inputBitrateMbps: (inputBitrateKbps / 1000).toFixed(2),
+        fileSizeBytes: inputFileSize,
+        durationSeconds: fileDuration,
+      });
     }
 
     // Validate compression ratio was provided
@@ -354,20 +369,33 @@ export function processVideoFileWithContext(
       const estimatedOutputSizeGB = inputFileSize / compressionRatio / (1024 * 1024 * 1024);
       const estimatedOutputSizePerHour = fileDuration > 0 ? (estimatedOutputSizeGB * 3600) / fileDuration : 0;
       
-      console.log(
+      debugLogger.info(
         `[Compression] Target: ${compressionRatio}x compression → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
-      console.log(
+      debugLogger.info(
         `[Compression] Estimated output: ${estimatedOutputSizeGB.toFixed(2)}GB (${estimatedOutputSizePerHour.toFixed(1)}GB/hour)`
       );
+      debugLogger.log("COMPRESSION", "Compression ratio calculation", {
+          compressionRatio,
+          targetBitrateKbps,
+          targetBitrateMbps: (targetBitrateKbps / 1000).toFixed(2),
+          inputBitrateKbps: inputBitrateKbps.toFixed(0),
+          estimatedOutputSizeGB: estimatedOutputSizeGB.toFixed(2),
+          estimatedOutputSizePerHour: estimatedOutputSizePerHour.toFixed(1),
+        });
     } else {
       // Compression ratio specified but can't calculate input bitrate - use fallback
       // Fallback: assume input is ~20 Mbps (typical for high-quality video), then apply compression
       const assumedInputBitrateKbps = 20000;
       targetBitrateKbps = Math.round(assumedInputBitrateKbps / compressionRatio);
-      console.warn(
+      debugLogger.warn(
         `[Compression] Could not determine input bitrate, using fallback. ${compressionRatio}x compression → ${targetBitrateKbps} kbps`
       );
+      debugLogger.log("COMPRESSION", "Using fallback bitrate calculation", {
+        compressionRatio,
+        targetBitrateKbps,
+        fallback: true,
+      });
     }
 
     // Determine muxer based on output format
@@ -413,7 +441,7 @@ export function processVideoFileWithContext(
       // VideoToolbox requires explicit rate-control=abr and realtime=false for bitrate to work
       // Without rate-control=abr, bitrate is ignored or treated as a hint
       // realtime=false prevents latency/quality constraints from overriding bitrate
-      console.log(
+      debugLogger.info(
         `[VideoToolbox] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
       encoderArgs = [
@@ -422,28 +450,49 @@ export function processVideoFileWithContext(
         "rate-control=abr", // Average bitrate mode - required for bitrate to be meaningful
         "realtime=false", // Disable realtime mode to allow bitrate constraints
       ];
+      debugLogger.logEncoderConfig(
+        encoder,
+        config.compressionRatio!,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
     } else if (encoder === "nvh265enc") {
       // NVIDIA NVENC - bitrate works directly with default rate control
-      console.log(
+      debugLogger.info(
         `[NVENC] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
       encoderArgs = [
         encoder,
         `bitrate=${targetBitrateKbps}`,
       ];
+      debugLogger.logEncoderConfig(
+        encoder,
+        config.compressionRatio!,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
     } else if (encoder === "qsvh265enc") {
       // Intel Quick Sync - bitrate works directly with default rate control
-      console.log(
+      debugLogger.info(
         `[QSV] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
       encoderArgs = [
         encoder,
         `bitrate=${targetBitrateKbps}`,
       ];
+      debugLogger.logEncoderConfig(
+        encoder,
+        config.compressionRatio!,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
     } else if (encoder === "x265enc") {
       // Software x265 - use bitrate mode (NOT CRF/CQP)
       // Important: Don't use CRF/CQP options when targeting bitrate
-      console.log(
+      debugLogger.info(
         `[x265] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
       encoderArgs = [
@@ -453,6 +502,13 @@ export function processVideoFileWithContext(
         // Bitrate-based encoding options (no CRF/CQP)
         `option-string="key-int-max=120:rc-lookahead=10:bframes=3"`,
       ];
+      debugLogger.logEncoderConfig(
+        encoder,
+        config.compressionRatio!,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
     } else {
       // Fallback for unknown encoders
       encoderArgs = [
@@ -503,7 +559,14 @@ export function processVideoFileWithContext(
       "send-keyframe-requests=true",
     ].filter(Boolean);
 
+    // Log the full pipeline for debugging
+    debugLogger.logPipeline(args);
+
     const gstLaunchPath = getGstLaunchPathWithContext(context);
+    debugLogger.log("GSTREAMER", "GStreamer launch path", {
+      path: gstLaunchPath,
+      exists: fs.existsSync(gstLaunchPath),
+    });
     const { env: gstEnv, binPath } = getGStreamerPathWithContext(context);
 
     // Check if GStreamer executable exists (if we have a specific path)
@@ -531,7 +594,7 @@ export function processVideoFileWithContext(
       const abortHandler = () => {
         if (!isCancelled) {
           isCancelled = true;
-          console.log("[GStreamer] Processing cancelled by user");
+          debugLogger.info("[GStreamer] Processing cancelled by user");
           gst.kill("SIGTERM");
           // Give it a moment, then force kill if needed
           setTimeout(() => {
@@ -646,7 +709,7 @@ export function processVideoFileWithContext(
         }
       } catch (e) {
         if (DEBUG_PROGRESS)
-          console.warn(`[Progress] Error checking chunks: ${e}`);
+          debugLogger.warn(`[Progress] Error checking chunks: ${e}`);
       }
 
       // Update current chunk tracking
@@ -822,7 +885,7 @@ export function processVideoFileWithContext(
         etaStr = `, ETA: calculating...`;
       }
 
-      console.log(
+      debugLogger.info(
         `[Progress] File: ${fileProgress}%, Chunk: ${currentChunk}/${totalChunks} (${chunkProgress}%)` +
           posStr +
           outputStr +
@@ -867,7 +930,7 @@ export function processVideoFileWithContext(
           fileDuration = duration;
           durationIsEstimated = false;
           totalChunks = Math.ceil(fileDuration / chunkDuration);
-          console.log(
+          debugLogger.info(
             `[Progress] Duration from progressreport: ${duration}s, chunks: ${totalChunks}`
           );
         }
@@ -886,7 +949,8 @@ export function processVideoFileWithContext(
         sendProgressUpdate();
       } else if (output.trim()) {
         // Only log non-progress output
-        console.log(`[GStreamer] ${output.trim()}`);
+        debugLogger.info(`[GStreamer] ${output.trim()}`);
+        debugLogger.logGStreamerOutput("stdout", output);
       }
     });
 
@@ -908,10 +972,12 @@ export function processVideoFileWithContext(
         text.includes("high-resolution clock");
 
       if (isStatusMessage) {
-        console.log(`[GStreamer] ${text.trim()}`);
+        debugLogger.info(`[GStreamer] ${text.trim()}`);
+        debugLogger.logGStreamerOutput("stderr", text);
       } else if (text.trim()) {
         errorOutput += text;
-        console.error(`[GStreamer ERROR] ${text.trim()}`);
+        debugLogger.error(`[GStreamer ERROR] ${text.trim()}`);
+        debugLogger.logGStreamerOutput("stderr", text);
       }
     });
 
@@ -942,6 +1008,37 @@ export function processVideoFileWithContext(
       }
 
       if (code === 0) {
+        // Log output file information
+        try {
+          // Check for output chunks
+          let chunkNum = 0;
+          let totalOutputSize = 0;
+          while (chunkNum <= 100) {
+            const chunkFileName = `${inputFileName}_${String(chunkNum).padStart(2, "0")}.${config.outputFormat}`;
+            const chunkPath = path.join(normalizedOutputDir, chunkFileName);
+            if (fs.existsSync(chunkPath)) {
+              const stats = fs.statSync(chunkPath);
+              totalOutputSize += stats.size;
+              debugLogger.logOutputInfo(chunkPath, stats.size);
+              chunkNum++;
+            } else {
+              break;
+            }
+          }
+          if (totalOutputSize > 0) {
+            debugLogger.log("OUTPUT_SUMMARY", "Encoding complete", {
+              totalOutputSize,
+              totalOutputSizeGB: (totalOutputSize / (1024 * 1024 * 1024)).toFixed(2),
+              inputSize: inputFileSize,
+              inputSizeGB: (inputFileSize / (1024 * 1024 * 1024)).toFixed(2),
+              actualCompressionRatio: (inputFileSize / totalOutputSize).toFixed(2),
+              targetCompressionRatio: config.compressionRatio,
+              chunksCreated: chunkNum,
+            });
+          }
+        } catch (e) {
+          debugLogger.log("ERROR", `Failed to log output info: ${e}`);
+        }
         resolve();
       } else {
         let errorMsg = `GStreamer exited with code ${code}`;

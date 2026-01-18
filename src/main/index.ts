@@ -15,6 +15,7 @@ import {
   EncoderDetectionResult,
 } from "../core/utils/encoder-detection";
 import { RuntimeContext } from "../core/utils/gstreamer-path";
+import { debugLogger } from "../core/utils/debug-logger";
 
 // Watch mode state
 let fileWatcher: chokidar.FSWatcher | null = null;
@@ -199,6 +200,22 @@ let mainWindow: BrowserWindow | null = null;
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId("com.electron");
+
+  // Initialize debug logger
+  const context: RuntimeContext = {
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath("userData"),
+  };
+  debugLogger.initialize(context);
+  
+  // Log application startup
+  debugLogger.logInit("Application starting");
+  debugLogger.logInit(`App version: ${app.getVersion()}`);
+  debugLogger.logInit(`Is packaged: ${app.isPackaged}`);
+  debugLogger.logInit(`App path: ${app.getAppPath()}`);
+  debugLogger.logInit(`User data path: ${app.getPath("userData")}`);
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -827,6 +844,63 @@ function setupIpcHandlers(): void {
       queued: watchQueue.length,
       stats: watchStats,
     };
+  });
+
+  // Debug logging handlers
+  ipcMain.handle("debug:set-enabled", (_, enabled: boolean) => {
+    debugLogger.setEnabled(enabled);
+    return { success: true, enabled: debugLogger.isEnabled() };
+  });
+
+  ipcMain.handle("debug:get-enabled", () => {
+    return { enabled: debugLogger.isEnabled() };
+  });
+
+  ipcMain.handle("debug:get-log-path", () => {
+    const logPath = debugLogger.getLogFilePath();
+    return { logPath };
+  });
+
+  ipcMain.handle("debug:get-log-files", () => {
+    const logFiles = debugLogger.getLogFiles();
+    return { logFiles };
+  });
+
+  ipcMain.handle("debug:read-log-file", async (_, filePath: string) => {
+    try {
+      const content = fs.readFileSync(filePath, "utf8");
+      return { success: true, content };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("debug:download-log-file", async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: "File not found" };
+      }
+
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        defaultPath: path.basename(filePath),
+        filters: [{ name: "Log Files", extensions: ["log"] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, canceled: true };
+      }
+
+      fs.copyFileSync(filePath, result.filePath);
+      return { success: true, path: result.filePath };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 }
 

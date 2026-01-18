@@ -2,29 +2,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { RuntimeContext, getGStreamerPathWithContext } from "./gstreamer-path";
-
-// Debug logging helper - writes to a file in production for troubleshooting
-function debugLog(message: string, context?: RuntimeContext): void {
-  console.log(message);
-
-  // In production, write to a user-writable directory (AppData on Windows)
-  // The userDataPath should be set to app.getPath('userData') for Electron
-  // which resolves to %APPDATA%\{app name} on Windows
-  try {
-    const logDir = context?.userDataPath || process.cwd();
-    
-    // Ensure log directory exists
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    
-    const logFile = path.join(logDir, "encoder-detection-debug.log");
-    const timestamp = new Date().toISOString();
-    fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);
-  } catch {
-    // Ignore file write errors
-  }
-}
+import { debugLogger } from "./debug-logger";
 
 /**
  * Available encoder types
@@ -110,12 +88,12 @@ async function ensureRegistryInitialized(
     if (!fs.existsSync(registryDir)) {
       try {
         fs.mkdirSync(registryDir, { recursive: true });
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Created registry directory: ${registryDir}`,
           context
         );
       } catch (e) {
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Failed to create registry directory: ${e}`,
           context
         );
@@ -129,7 +107,7 @@ async function ensureRegistryInitialized(
       const stats = fs.statSync(registryPath);
       const ageHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
       if (ageHours < 24) {
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Registry cache exists and is recent (${ageHours.toFixed(1)}h old)`,
           context
         );
@@ -140,9 +118,8 @@ async function ensureRegistryInitialized(
     }
   }
 
-  debugLog(
-    `[Encoder Detection] Initializing GStreamer registry (this may take 30+ seconds on first run)...`,
-    context
+  debugLogger.logInit(
+    `[Encoder Detection] Initializing GStreamer registry (this may take 30+ seconds on first run)...`
   );
 
   const platform = process.platform;
@@ -170,7 +147,7 @@ async function ensureRegistryInitialized(
 
     gstInspect.on("exit", (code) => {
       if (!timedOut) {
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Registry initialization completed (exit code: ${code})`,
           context
         );
@@ -179,9 +156,8 @@ async function ensureRegistryInitialized(
     });
 
     gstInspect.on("error", (err) => {
-      debugLog(
-        `[Encoder Detection] Registry initialization error: ${err.message}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Registry initialization error: ${err.message}`
       );
       resolve(false);
     });
@@ -189,9 +165,8 @@ async function ensureRegistryInitialized(
     // Allow 60 seconds for first-time registry initialization
     setTimeout(() => {
       timedOut = true;
-      debugLog(
-        `[Encoder Detection] Registry initialization timeout (60s) - killing process`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Registry initialization timeout (60s) - killing process`
       );
       gstInspect.kill();
       resolve(false);
@@ -223,60 +198,52 @@ async function checkGStreamerElement(
 
     // Debug: Log context and paths (first element only to avoid spam)
     if (elementName === "nvh265enc" || elementName === "x265enc") {
-      debugLog(`[Encoder Detection] === PATH DEBUG ===`, context);
-      debugLog(
-        `[Encoder Detection] Context: isPackaged=${context.isPackaged}`,
-        context
+      debugLogger.logInit(`[Encoder Detection] === PATH DEBUG ===`);
+      debugLogger.logInit(
+        `[Encoder Detection] Context: isPackaged=${context.isPackaged}`
       );
-      debugLog(
-        `[Encoder Detection] Context: appPath=${context.appPath}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Context: appPath=${context.appPath}`
       );
-      debugLog(
-        `[Encoder Detection] Context: resourcesPath=${context.resourcesPath}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Context: resourcesPath=${context.resourcesPath}`
       );
-      debugLog(`[Encoder Detection] Resolved binPath: ${binPath}`, context);
-      debugLog(
-        `[Encoder Detection] Resolved pluginPath: ${pluginPath}`,
-        context
+      debugLogger.logInit(`[Encoder Detection] Resolved binPath: ${binPath}`);
+      debugLogger.logInit(
+        `[Encoder Detection] Resolved pluginPath: ${pluginPath}`
       );
-      debugLog(
-        `[Encoder Detection] GST_PLUGIN_PATH env: ${processEnv.GST_PLUGIN_PATH}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] GST_PLUGIN_PATH env: ${processEnv.GST_PLUGIN_PATH}`
       );
       
       // Log critical GStreamer scanner and registry paths
       const scannerPath = processEnv.GST_PLUGIN_SCANNER_1_0 || processEnv.GST_PLUGIN_SCANNER;
       if (scannerPath) {
         const scannerExists = fs.existsSync(scannerPath);
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Plugin scanner: ${scannerPath} (exists: ${scannerExists})`,
           context
         );
       } else {
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] Plugin scanner: NOT SET (this will cause timeouts!)`,
           context
         );
       }
-      debugLog(
-        `[Encoder Detection] Registry path: ${processEnv.GST_REGISTRY_1_0 || "(not set)"}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Registry path: ${processEnv.GST_REGISTRY_1_0 || "(not set)"}`
       );
       
-      debugLog(
-        `[Encoder Detection] PATH env (first 500 chars): ${(processEnv.PATH || "").substring(0, 500)}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] PATH env (first 500 chars): ${(processEnv.PATH || "").substring(0, 500)}`
       );
     }
 
     if (binPath) {
       const fullPath = path.join(binPath, inspectExecutable);
       const exists = fs.existsSync(fullPath);
-      debugLog(
-        `[Encoder Detection] Looking for ${inspectExecutable} at: ${fullPath} (exists: ${exists})`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] Looking for ${inspectExecutable} at: ${fullPath} (exists: ${exists})`
       );
       if (exists) {
         inspectPath = fullPath;
@@ -285,12 +252,12 @@ async function checkGStreamerElement(
         try {
           if (fs.existsSync(binPath)) {
             const files = fs.readdirSync(binPath).slice(0, 20);
-            debugLog(
+            debugLogger.logInit(
               `[Encoder Detection] binPath directory contents (first 20): ${files.join(", ")}`,
               context
             );
           } else {
-            debugLog(
+            debugLogger.logInit(
               `[Encoder Detection] binPath does not exist: ${binPath}`,
               context
             );
@@ -298,14 +265,14 @@ async function checkGStreamerElement(
             const parent = path.dirname(binPath);
             if (fs.existsSync(parent)) {
               const parentFiles = fs.readdirSync(parent);
-              debugLog(
+              debugLogger.logInit(
                 `[Encoder Detection] Parent dir (${parent}) contents: ${parentFiles.join(", ")}`,
                 context
               );
             }
           }
         } catch (e) {
-          debugLog(
+          debugLogger.logInit(
             `[Encoder Detection] Error listing directory: ${e}`,
             context
           );
@@ -313,17 +280,15 @@ async function checkGStreamerElement(
       }
     }
 
-    debugLog(`[Encoder Detection] Using inspectPath: ${inspectPath}`, context);
+    debugLogger.logInit(`[Encoder Detection] Using inspectPath: ${inspectPath}`);
     
     // Log critical GStreamer environment variables for debugging
     if (elementName === "nvh265enc" || elementName === "x265enc") {
-      debugLog(
-        `[Encoder Detection] GST_PLUGIN_SCANNER_1_0: ${processEnv.GST_PLUGIN_SCANNER_1_0 || "(not set)"}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] GST_PLUGIN_SCANNER_1_0: ${processEnv.GST_PLUGIN_SCANNER_1_0 || "(not set)"}`
       );
-      debugLog(
-        `[Encoder Detection] GST_REGISTRY_1_0: ${processEnv.GST_REGISTRY_1_0 || "(not set)"}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] GST_REGISTRY_1_0: ${processEnv.GST_REGISTRY_1_0 || "(not set)"}`
       );
     }
 
@@ -350,12 +315,11 @@ async function checkGStreamerElement(
       // Element exists if exit code is 0 and we got output
       const exists =
         code === 0 && stdout.length > 0 && !stderr.includes("No such element");
-      debugLog(
-        `[Encoder Detection] gst-inspect ${elementName}: exitCode=${code}, stdout=${stdout.length}bytes, exists=${exists}${timedOut ? " (TIMED OUT)" : ""}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] gst-inspect ${elementName}: exitCode=${code}, stdout=${stdout.length}bytes, exists=${exists}${timedOut ? " (TIMED OUT)" : ""}`
       );
       if (stderr) {
-        debugLog(
+        debugLogger.logInit(
           `[Encoder Detection] gst-inspect ${elementName} stderr: ${stderr.substring(0, 500)}`,
           context
         );
@@ -364,9 +328,8 @@ async function checkGStreamerElement(
     });
 
     gstInspect.on("error", (err) => {
-      debugLog(
-        `[Encoder Detection] gst-inspect spawn error for ${elementName}: ${err.message}`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] gst-inspect spawn error for ${elementName}: ${err.message}`
       );
       resolve(false);
     });
@@ -374,9 +337,8 @@ async function checkGStreamerElement(
     // Timeout (default 10 seconds, can be overridden)
     setTimeout(() => {
       timedOut = true;
-      debugLog(
-        `[Encoder Detection] gst-inspect ${elementName}: TIMEOUT (${timeoutMs}ms) - killing process`,
-        context
+      debugLogger.logInit(
+        `[Encoder Detection] gst-inspect ${elementName}: TIMEOUT (${timeoutMs}ms) - killing process`
       );
       gstInspect.kill();
       resolve(false);
@@ -393,15 +355,14 @@ export async function detectAvailableEncoders(
   const platform = process.platform;
   const results: EncoderInfo[] = [];
 
-  debugLog("[Encoder Detection] Scanning for available encoders...", context);
+  debugLogger.logInit("[Encoder Detection] Scanning for available encoders...");
 
   // Initialize GStreamer registry first (critical for first run)
   // This can take 30+ seconds on first run but subsequent runs will be fast
   const registryReady = await ensureRegistryInitialized(context);
   if (!registryReady) {
-    debugLog(
-      "[Encoder Detection] Warning: Registry initialization failed, encoder detection may be incomplete",
-      context
+    debugLogger.logInit(
+      "[Encoder Detection] Warning: Registry initialization failed, encoder detection may be incomplete"
     );
   }
 
@@ -423,9 +384,8 @@ export async function detectAvailableEncoders(
       context
     );
 
-    debugLog(
-      `[Encoder Detection] ${encoder.name} (${encoder.gstreamerElement}): ${available ? "✓ Available" : "✗ Not available"}`,
-      context
+    debugLogger.logInit(
+      `[Encoder Detection] ${encoder.name} (${encoder.gstreamerElement}): ${available ? "✓ Available" : "✗ Not available"}`
     );
 
     results.push({
@@ -453,9 +413,8 @@ export async function detectAvailableEncoders(
 
   const hasHardwareEncoder = availableEncoders.some((e) => e.id !== "x265");
 
-  debugLog(
-    `[Encoder Detection] Recommended encoder: ${recommendedId}${hasHardwareEncoder ? " (hardware acceleration available)" : " (software only)"}`,
-    context
+  debugLogger.logInit(
+    `[Encoder Detection] Recommended encoder: ${recommendedId}${hasHardwareEncoder ? " (hardware acceleration available)" : " (software only)"}`
   );
 
   return {

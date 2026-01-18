@@ -441,35 +441,38 @@ export function processVideoFileWithContext(
       // VideoToolbox encoder configuration
       // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/applemedia/vtenc_h265.html
       // 
-      // DOCUMENTED PROPERTIES:
-      // - bitrate: target bitrate in kbps (0 = auto)
-      // - data-rate-limits: "bytes_per_second,duration_seconds" - enforces data rate limit
-      // - allow-frame-reordering: enables B-frames for better compression efficiency
+      // NOTE: VideoToolbox's bitrate property is unreliable and often ignored.
+      // Using QUALITY-based encoding instead, which VideoToolbox actually respects.
       //
-      // NOTE: HandBrake achieves reliable bitrate control using ABR mode + buffer constraints.
-      // GStreamer's vtenc_h265 exposes bitrate + data-rate-limits for similar control.
+      // Quality property: 0.0 (lowest) to 1.0 (highest)
+      // We map compression ratio to quality using an inverse square root relationship:
+      //   quality = 1.0 / sqrt(compressionRatio)
       //
-      // IMPORTANT: data-rate-limits uses BYTES per second, not kbps!
-      // Convert: kbps * 1000 bits / 8 bits per byte = bytes per second
+      // This gives:
+      //   1x compression → quality 1.00 (maximum quality)
+      //   2x compression → quality 0.71 (very high quality)
+      //   4x compression → quality 0.50 (high quality)
+      //   5x compression → quality 0.45 (good quality)
+      //   10x compression → quality 0.32 (medium quality)
+      //   20x compression → quality 0.22 (lower quality)
       
-      // Convert kbps to bytes/second for data-rate-limits
-      const bytesPerSecond = Math.round(targetBitrateKbps * 1000 / 8);
+      const compressionRatio = config.compressionRatio!;
+      // Map compression ratio to quality (inverse sqrt relationship)
+      // Clamp between 0.1 and 1.0 to avoid extreme values
+      const qualityValue = Math.max(0.1, Math.min(1.0, 1.0 / Math.sqrt(compressionRatio)));
       
       debugLogger.info(
-        `[VideoToolbox] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps), Data rate limit: ${bytesPerSecond} bytes/sec`
+        `[VideoToolbox] Compression: ${compressionRatio}x → Quality: ${qualityValue.toFixed(3)} (target bitrate would be: ${targetBitrateKbps} kbps)`
       );
       encoderArgs = [
         encoder,
-        `bitrate=${targetBitrateKbps}`,
-        // data-rate-limits: enforce data rate over 1-second intervals
-        // Format: "bytes_per_second,duration_in_seconds"
-        `data-rate-limits=${bytesPerSecond},1.0`,
-        // Enable B-frames for better compression efficiency (like HandBrake)
+        `quality=${qualityValue.toFixed(3)}`,
+        // Enable B-frames for better compression efficiency
         "allow-frame-reordering=true",
       ];
       debugLogger.logEncoderConfig(
         encoder,
-        config.compressionRatio!,
+        compressionRatio,
         targetBitrateKbps,
         inputBitrateKbps,
         encoderArgs

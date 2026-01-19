@@ -34,7 +34,7 @@ function formatTime(seconds: number): string {
   const secs = Math.floor(seconds % 60);
 
   if (hours > 0) {
-    return `${hours}h ${minutes}m ${secs}s`;
+    return `${hours}h ${minutes}m`;
   } else if (minutes > 0) {
     return `${minutes}m ${secs}s`;
   } else {
@@ -1075,7 +1075,7 @@ function VideoProcessor() {
                     <ProgressBar percent={overallProgress} color="cyan" />
                   </div>
                   <span
-                    className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"
+                    className="text-xs sm:text-sm w-28 sm:w-36 text-right font-mono"
                     style={{ color: "var(--color-text-muted)" }}
                   >
                     {processing ? `${overallProgress}%` : "0%"}

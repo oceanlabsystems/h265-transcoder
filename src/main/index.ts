@@ -401,6 +401,9 @@ function setupIpcHandlers(): void {
 
         // Calculate total bytes across all files for accurate progress tracking
         const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+        
+        console.log(`[Batch Progress] Total bytes to process: ${(totalBytes / (1024*1024*1024)).toFixed(2)}GB across ${totalFiles} files`);
+        debugLogger.info(`[Batch Progress] Total bytes to process: ${(totalBytes / (1024*1024*1024)).toFixed(2)}GB across ${totalFiles} files`);
 
         let processedFiles = 0;
         let skippedFiles = 0;
@@ -547,6 +550,17 @@ function setupIpcHandlers(): void {
                   progressElapsedSeconds > 0
                     ? totalProcessedBytes / progressElapsedSeconds
                     : 0;
+
+                // Debug: Log overall batch progress periodically (every 10 seconds or ~5% of updates)
+                const shouldLogBatchProgress = Math.random() < 0.05;
+                if (shouldLogBatchProgress) {
+                  const batchProgressMsg = `[Batch Progress] Overall: ${overallProgress}%, ` +
+                    `File ${i + 1}/${totalFiles}: ${progressStatus.fileProgress}%, ` +
+                    `ETA: ${overallEta !== undefined ? overallEta + 's' : 'calculating'}, ` +
+                    `Bytes: ${(totalProcessedBytes / (1024*1024*1024)).toFixed(2)}GB / ${(totalBytes / (1024*1024*1024)).toFixed(2)}GB`;
+                  console.log(batchProgressMsg);
+                  debugLogger.info(batchProgressMsg);
+                }
 
                 sendProgressUpdate({
                   currentFile: fileName,

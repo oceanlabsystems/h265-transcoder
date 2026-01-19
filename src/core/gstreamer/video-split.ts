@@ -306,7 +306,7 @@ export function getVideoDurationWithContext(
           if (inputFileSize > 0) {
             const minExpectedDuration = Math.max(
               60, // At least 1 minute
-              (inputFileSize * 8) / (50000 * 1000000) // Assume max 50 Mbps bitrate
+              (inputFileSize * 8) / (50 * 1000 * 1000) // Assume max 50 Mbps bitrate
             );
 
             // If duration seems suspiciously short, try pipeline method
@@ -359,7 +359,7 @@ export function getVideoDurationWithContext(
                   const fileSizeGB = inputFileSize / (1024 * 1024 * 1024);
                   const minExpectedDuration = Math.max(
                     60,
-                    (inputFileSize * 8) / (50000 * 1000000)
+                    (inputFileSize * 8) / (50 * 1000 * 1000)
                   );
                   
                   if (
@@ -693,34 +693,37 @@ export function processVideoFileWithContext(
       // VideoToolbox encoder configuration
       // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/applemedia/vtenc_h265.html
       // 
-      // NOTE: VideoToolbox's bitrate property is unreliable and often ignored.
-      // Using QUALITY-based encoding instead, which VideoToolbox actually respects.
-      //
+      // Quality-based encoding with bitrate constraint for reliable compression.
       // Quality property: 0.0 (lowest) to 1.0 (highest)
-      // We map compression ratio to quality using an inverse square root relationship:
-      //   quality = 1.0 / sqrt(compressionRatio)
+      //
+      // EMPIRICAL TESTING RESULTS (v1.4.12):
+      // - quality 0.975 → ~0.55x compression (files grow larger than input!)
+      // - quality 0.82  → ~1.0x compression (no compression at all)
+      // - quality 0.707 → ~18x compression (too aggressive)
+      //
+      // The relationship is highly non-linear. Using logarithmic mapping:
+      //   quality = 0.80 - log2(compressionRatio) * 0.12
       //
       // This gives:
-      //   1x compression → quality 1.00 (maximum quality)
-      //   2x compression → quality 0.71 (very high quality)
-      //   4x compression → quality 0.50 (high quality)
-      //   5x compression → quality 0.45 (good quality)
-      //   10x compression → quality 0.32 (medium quality)
-      //   20x compression → quality 0.22 (lower quality)
+      //   1x compression → quality 0.80 (near lossless)
+      //   2x compression → quality 0.68 (high quality with actual compression)
+      //   4x compression → quality 0.56 (good quality)
+      //   5x compression → quality 0.52 (good quality)
+      //   10x compression → quality 0.40 (medium quality)
+      //   20x compression → quality 0.28 (lower quality)
       
       const compressionRatio = config.compressionRatio!;
-      // Map compression ratio to quality based on empirical testing:
-      // - quality 0.975 → ~0.55x compression (files grow larger than input!)
-      // - quality 0.707 → ~18x compression (too aggressive)
-      // Target: quality ~0.82 for 2x compression from ProRes 422 input
-      const qualityValue = Math.max(0.5, 0.90 - (compressionRatio - 1) * 0.08);
+      // Logarithmic quality mapping for more predictable compression
+      const qualityValue = Math.max(0.25, Math.min(0.80, 0.80 - Math.log2(compressionRatio) * 0.12));
       
       debugLogger.info(
-        `[VideoToolbox] Compression: ${compressionRatio}x → Quality: ${qualityValue.toFixed(3)} (target bitrate would be: ${targetBitrateKbps} kbps)`
+        `[VideoToolbox] Compression: ${compressionRatio}x → Quality: ${qualityValue.toFixed(3)}, Max bitrate: ${targetBitrateKbps} kbps`
       );
       encoderArgs = [
         encoder,
         `quality=${qualityValue.toFixed(3)}`,
+        // Add max-bitrate constraint to help ensure target compression is achieved
+        `max-bitrate=${targetBitrateKbps}`,
         // Enable B-frames for better compression efficiency
         "allow-frame-reordering=true",
       ];

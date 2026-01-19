@@ -494,8 +494,10 @@ function setupIpcHandlers(): void {
                   totalBytesProcessed + currentFileProcessedBytes;
 
                 // Calculate overall progress based on bytes (industry best practice)
-                const overallProgress = Math.round(
-                  (totalProcessedBytes / totalBytes) * 100
+                // Cap at 100% to prevent display issues when duration detection fails
+                const overallProgress = Math.min(
+                  100,
+                  Math.round((totalProcessedBytes / totalBytes) * 100)
                 );
 
                 // Note: Detailed progress is logged by video-split.ts

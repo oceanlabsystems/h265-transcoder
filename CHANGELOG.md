@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.12](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.11...v1.4.12) (2026-01-19)
+
+
+### Bug Fixes
+
+* **gstreamer:** incorrect duration retrieval for large files ([4cfbbfd](https://github.com/oceanlabsystems/h265-transcoder/commit/4cfbbfd9976ae0a13e429270eea646a34c0007a9))
+
 ### [1.4.11](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.10...v1.4.11) (2026-01-18)
 
 ### [1.4.10](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.9...v1.4.10) (2026-01-18)

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.4.13](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.12...v1.4.13) (2026-01-19)
+
+
+### Bug Fixes
+
+* duration detection bug and compression ratio issue on mac vtenc ([d1b977f](https://github.com/oceanlabsystems/h265-transcoder/commit/d1b977fe8a1997d38aeef7c6aa5bbf4bf60a3d12))
+
 ### [1.4.12](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.11...v1.4.12) (2026-01-19)
 
 

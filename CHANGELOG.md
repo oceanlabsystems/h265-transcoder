@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.5.0](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.13...v1.5.0) (2026-01-20)
+
+
+### Bug Fixes
+
+* cbr bitrate config in gstreamer encoders. quality encoding fallback if metadata corrupt ([db755fb](https://github.com/oceanlabsystems/h265-transcoder/commit/db755fb4843478efe8bc2c3b93c66663de2147c2))
+
 ### [1.4.13](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.12...v1.4.13) (2026-01-19)
 
 

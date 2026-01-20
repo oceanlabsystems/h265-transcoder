@@ -67,161 +67,9 @@ function getQualityForCompressionRatio(compressionRatio: number): QualityValues 
 }
 
 /**
- * Fallback: Try to get video duration using ffprobe (if available)
- */
-function tryFfprobeDuration(inputPath: string): Promise<number | null> {
-  return new Promise((resolve) => {
-    // Try ffprobe first as it's more reliable
-    const ffprobeArgs = [
-      "-v",
-      "quiet",
-      "-show_entries",
-      "format=duration",
-      "-of",
-      "csv=p=0",
-      inputPath,
-    ];
-
-    const ffprobe = spawn("ffprobe", ffprobeArgs);
-    let output = "";
-
-    ffprobe.stdout.on("data", (data) => {
-      output += data.toString();
-    });
-
-    ffprobe.on("exit", (code) => {
-      if (code === 0) {
-        const duration = parseFloat(output.trim());
-        if (!isNaN(duration) && duration > 0) {
-          debugLogger.info(`[Duration] Got duration from ffprobe: ${duration}s`);
-          resolve(duration);
-          return;
-        }
-      }
-      resolve(null);
-    });
-
-    ffprobe.on("error", () => {
-      resolve(null); // ffprobe not available
-    });
-  });
-}
-
-/**
- * Get duration using GStreamer pipeline with progressreport
- * This method forces GStreamer to read through the file to find the moov atom,
- * which is more reliable for large files where the moov atom is at the end.
- */
-function getDurationViaProgressReport(
-  inputPath: string,
-  context: RuntimeContext
-): Promise<number | null> {
-  return new Promise((resolve) => {
-    // Convert path to file:// URI format for GStreamer
-    let fileUri = inputPath.replace(/\\/g, "/");
-    if (/^[A-Za-z]:/.test(fileUri)) {
-      // Windows path: C:/path -> file:///C:/path
-      fileUri = fileUri.replace(/^([A-Za-z]):/, "file:///$1:");
-    } else if (fileUri.startsWith("/")) {
-      // Unix path: /path -> file:///path
-      fileUri = "file://" + fileUri;
-    }
-
-    const { env: gstEnv } = getGStreamerPathWithContext(context);
-    const processEnv = { ...process.env, ...gstEnv };
-    const gstLaunchPath = getGstLaunchPathWithContext(context);
-
-    debugLogger.info(
-      `[Duration] Attempting pipeline-based duration detection for large file...`
-    );
-
-    // Pipeline that uses progressreport to get accurate duration
-    // uridecodebin will read the full file structure to find the moov atom
-    const args = [
-      "-q", // Quiet mode
-      "uridecodebin",
-      `uri=${fileUri}`,
-      "!",
-      "progressreport",
-      "update-freq=0", // Only report at end
-      "silent=false",
-      "!",
-      "fakesink", // Dummy sink that doesn't output anything
-    ];
-
-    const gst = spawn(gstLaunchPath, args, { env: processEnv });
-
-    let output = "";
-    let stderr = "";
-
-    gst.stdout.on("data", (data) => {
-      output += data.toString();
-    });
-
-    gst.stderr.on("data", (data) => {
-      stderr += data.toString();
-      output += data.toString(); // progressreport may output to stderr
-    });
-
-    // Longer timeout for large files - allow up to 2 minutes
-    const timeout = setTimeout(() => {
-      gst.kill("SIGTERM");
-      debugLogger.warn(
-        `[Duration] Pipeline-based detection timed out after 2 minutes`
-      );
-      resolve(null);
-    }, 120000); // 2 minute timeout
-
-    gst.on("exit", (code) => {
-      clearTimeout(timeout);
-
-      // Parse duration from progressreport output
-      // Format: "progressreport0 (00:00:03): 1234 / 5678 seconds"
-      const match = output.match(/(\d+)\s*\/\s*(\d+)\s*seconds/i);
-      if (match) {
-        const duration = parseInt(match[2], 10);
-        if (duration > 0) {
-          debugLogger.info(
-            `[Duration] Pipeline method found duration: ${duration}s`
-          );
-          resolve(duration);
-          return;
-        }
-      }
-
-      // Try alternative parsing from stderr
-      const stderrMatch = stderr.match(/(\d+)\s*\/\s*(\d+)\s*seconds/i);
-      if (stderrMatch) {
-        const duration = parseInt(stderrMatch[2], 10);
-        if (duration > 0) {
-          debugLogger.info(
-            `[Duration] Pipeline method found duration (from stderr): ${duration}s`
-          );
-          resolve(duration);
-          return;
-        }
-      }
-
-      debugLogger.warn(
-        `[Duration] Pipeline method failed to parse duration. Exit code: ${code}`
-      );
-      resolve(null);
-    });
-
-    gst.on("error", (error) => {
-      clearTimeout(timeout);
-      debugLogger.warn(
-        `[Duration] Pipeline method error: ${error.message}`
-      );
-      resolve(null);
-    });
-  });
-}
-
-/**
- * Get video file duration in seconds using GStreamer
- * Uses hybrid approach: gst-discoverer first, then pipeline fallback for edge cases
- * Falls back to ffprobe if gst-discoverer is not available
+ * Get video file duration in seconds using GStreamer's gst-discoverer
+ * Note: For files with corrupt metadata, the caller should validate the returned duration
+ * against file size and fall back to estimation if needed (bitrate sanity check)
  */
 export function getVideoDurationWithContext(
   inputPath: string,
@@ -263,20 +111,9 @@ export function getVideoDurationWithContext(
       debugLogger.warn(
         `[Duration] gst-discoverer-1.0 not found at: ${discovererPath}`
       );
-      debugLogger.warn(
-        `[Duration] Trying ffprobe fallback... (install full GStreamer for best accuracy)`
-      );
-
-      // Try ffprobe fallback
-      const ffprobeDuration = await tryFfprobeDuration(inputPath);
-      if (ffprobeDuration !== null) {
-        resolve(ffprobeDuration);
-        return;
-      }
-
       reject(
         new Error(
-          `gst-discoverer-1.0 not found and ffprobe unavailable. ` +
+          `gst-discoverer-1.0 not found. ` +
             `Install GStreamer from https://gstreamer.freedesktop.org/download/ ` +
             `or run: node scripts/download-gstreamer.js`
         )
@@ -317,17 +154,10 @@ export function getVideoDurationWithContext(
     discoverer.on("exit", async (code) => {
       clearTimeout(timeout);
 
-      // If timed out, try pipeline method
+      // If timed out, let the caller handle with estimated duration
       if (timedOut) {
-        const pipelineDuration = await getDurationViaProgressReport(
-          inputPath,
-          context
-        );
-        if (pipelineDuration !== null && pipelineDuration > 0) {
-          resolve(pipelineDuration);
-          return;
-        }
-        // If pipeline also fails, continue to error handling
+        reject(new Error(`gst-discoverer timed out after ${timeoutMs / 1000}s`));
+        return;
       }
 
       if (code === 0) {
@@ -345,43 +175,23 @@ export function getVideoDurationWithContext(
           const totalSeconds = hours * 3600 + minutes * 60 + seconds;
 
           // Enhanced validation: check if duration makes sense for file size
+          // Note: We just log warnings here - the caller will handle corrupt durations
+          // via bitrate sanity check and fall back to estimated/blind mode
           if (inputFileSize > 0) {
             const minExpectedDuration = Math.max(
               60, // At least 1 minute
               (inputFileSize * 8) / (50 * 1000 * 1000) // Assume max 50 Mbps bitrate
             );
 
-            // If duration seems suspiciously short, try pipeline method
+            // If duration seems suspiciously short, log warning
+            // The caller's bitrate sanity check will detect this and use estimated duration
             if (
               fileSizeGB > 10 &&
               totalSeconds < minExpectedDuration * 0.1
             ) {
               debugLogger.warn(
                 `[Duration] Reported duration ${totalSeconds}s seems too short for ${fileSizeGB.toFixed(2)}GB file. ` +
-                  `Minimum expected: ${Math.round(minExpectedDuration)}s. Trying pipeline method...`
-              );
-
-              const pipelineDuration = await getDurationViaProgressReport(
-                inputPath,
-                context
-              );
-              if (
-                pipelineDuration !== null &&
-                pipelineDuration > minExpectedDuration * 0.5
-              ) {
-                debugLogger.info(
-                  `[Duration] Pipeline method found more reliable duration: ${pipelineDuration}s (vs ${totalSeconds}s)`
-                );
-                resolve(pipelineDuration);
-                return;
-              }
-            }
-
-            // Log warning if duration seems short but not short enough to trigger fallback
-            if (fileSizeGB > 10 && totalSeconds < 60) {
-              debugLogger.warn(
-                `[Duration Warning] File size is ${fileSizeGB.toFixed(2)}GB but duration is only ${totalSeconds}s. ` +
-                  `This seems incorrect - duration detection may have failed.`
+                  `Minimum expected: ${Math.round(minExpectedDuration)}s. Metadata may be corrupt - will use blind/estimated mode.`
               );
             }
           }
@@ -396,7 +206,7 @@ export function getVideoDurationWithContext(
               if (json.duration && typeof json.duration === "number") {
                 const totalSeconds = json.duration / 1000000000; // Convert nanoseconds to seconds
                 
-                // Validate JSON duration too
+                // Validate JSON duration - log warning if suspicious
                 if (inputFileSize > 0) {
                   const fileSizeGB = inputFileSize / (1024 * 1024 * 1024);
                   const minExpectedDuration = Math.max(
@@ -409,19 +219,9 @@ export function getVideoDurationWithContext(
                     totalSeconds < minExpectedDuration * 0.1
                   ) {
                     debugLogger.warn(
-                      `[Duration] JSON duration ${totalSeconds}s seems too short. Trying pipeline method...`
+                      `[Duration] JSON duration ${totalSeconds}s seems too short for ${fileSizeGB.toFixed(2)}GB file. ` +
+                        `Metadata may be corrupt - will use blind/estimated mode.`
                     );
-                    const pipelineDuration = await getDurationViaProgressReport(
-                      inputPath,
-                      context
-                    );
-                    if (
-                      pipelineDuration !== null &&
-                      pipelineDuration > minExpectedDuration * 0.5
-                    ) {
-                      resolve(pipelineDuration);
-                      return;
-                    }
                   }
                 }
                 
@@ -433,20 +233,7 @@ export function getVideoDurationWithContext(
             // JSON parsing failed, continue to error
           }
 
-          // If parsing failed, try pipeline method as last resort
-          debugLogger.warn(
-            `[Duration] Could not parse duration from gst-discoverer output. Trying pipeline method...`
-          );
-          const pipelineDuration = await getDurationViaProgressReport(
-            inputPath,
-            context
-          );
-          if (pipelineDuration !== null && pipelineDuration > 0) {
-            resolve(pipelineDuration);
-            return;
-          }
-
-          // Fallback: try to parse from other formats
+          // Fallback: reject with error - the caller can estimate from file size
           reject(
             new Error(
               `Could not parse duration from GStreamer output. Output: ${output.substring(0, 200)}`
@@ -454,29 +241,10 @@ export function getVideoDurationWithContext(
           );
         }
       } else {
-        // gst-discoverer failed - try pipeline method first, then ffprobe
+        // gst-discoverer failed
         debugLogger.warn(
-          `[Duration] gst-discoverer failed with code ${code}, trying pipeline method...`
+          `[Duration] gst-discoverer failed with code ${code}`
         );
-        const pipelineDuration = await getDurationViaProgressReport(
-          inputPath,
-          context
-        );
-        if (pipelineDuration !== null && pipelineDuration > 0) {
-          resolve(pipelineDuration);
-          return;
-        }
-
-        // If pipeline also fails, try ffprobe
-        debugLogger.warn(
-          `[Duration] Pipeline method also failed, trying ffprobe...`
-        );
-        const ffprobeDuration = await tryFfprobeDuration(inputPath);
-        if (ffprobeDuration !== null) {
-          resolve(ffprobeDuration);
-          return;
-        }
-
         reject(
           new Error(
             `GStreamer discoverer exited with code ${code}. Output: ${output.substring(0, 200)}`
@@ -485,26 +253,11 @@ export function getVideoDurationWithContext(
       }
     });
 
-    discoverer.on("error", async (error) => {
+    discoverer.on("error", (error) => {
       clearTimeout(timeout);
-      // gst-discoverer spawn failed - try pipeline method first, then ffprobe
       debugLogger.warn(
-        `[Duration] gst-discoverer error: ${error.message}. Trying pipeline method...`
+        `[Duration] gst-discoverer error: ${error.message}`
       );
-      const pipelineDuration = await getDurationViaProgressReport(
-        inputPath,
-        context
-      );
-      if (pipelineDuration !== null && pipelineDuration > 0) {
-        resolve(pipelineDuration);
-        return;
-      }
-
-      const ffprobeDuration = await tryFfprobeDuration(inputPath);
-      if (ffprobeDuration !== null) {
-        resolve(ffprobeDuration);
-        return;
-      }
       reject(error);
     });
   });
@@ -1340,11 +1093,15 @@ export function processVideoFileWithContext(
         currentPositionSeconds: currentPositionSeconds > 0 ? currentPositionSeconds : undefined,
         fileDuration: fileDuration > 0 ? fileDuration : undefined,
         outputBytes: totalOutputSize > 0 ? totalOutputSize : undefined,
+        durationIsEstimated, // Flag for UI to show "blind mode" when duration is unknown
       });
     };
 
     // Send initial progress update
     sendProgressUpdate();
+
+    // Track if we originally detected corrupt metadata (used to prevent progressreport override)
+    const initialDurationWasEstimated = durationIsEstimated;
 
     // Parse progressreport output to get input position
     // Actual format: "progressreport0 (00:00:03): 0 / 1352 seconds ( 0.0 %)"
@@ -1360,10 +1117,21 @@ export function processVideoFileWithContext(
         // Update position (can be 0 at start, that's valid)
         currentPositionSeconds = position;
 
-        // If we got a better duration from progressreport, use it
-        if (duration > 0 && (fileDuration === 0 || durationIsEstimated)) {
+        // If we originally estimated duration due to corrupt metadata, DON'T override it
+        // progressreport reads the same corrupt metadata, so it would give us the same wrong value
+        if (initialDurationWasEstimated) {
+          // Just log that we're ignoring progressreport's duration
+          if (duration !== fileDuration) {
+            debugLogger.info(
+              `[Progress] Ignoring progressreport duration (${duration}s) - using estimated duration (${fileDuration}s) due to corrupt metadata`
+            );
+          }
+          return true;
+        }
+
+        // If we didn't have corrupt metadata initially, trust progressreport for better accuracy
+        if (duration > 0 && fileDuration === 0) {
           fileDuration = duration;
-          durationIsEstimated = false;
           totalChunks = Math.ceil(fileDuration / chunkDuration);
           debugLogger.info(
             `[Progress] Duration from progressreport: ${duration}s, chunks: ${totalChunks}`

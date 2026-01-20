@@ -197,6 +197,7 @@ function VideoProcessor() {
   const [processedBytes, setProcessedBytes] = useState<number>(0);
   const [totalBytes, setTotalBytes] = useState<number>(0);
   const [throughputBps, setThroughputBps] = useState<number>(0);
+  const [durationIsEstimated, setDurationIsEstimated] = useState<boolean>(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [debugLoggingEnabled, setDebugLoggingEnabled] = useState<boolean>(false);
 
@@ -304,6 +305,7 @@ function VideoProcessor() {
         setProcessedBytes(status.processedBytes || 0);
         setTotalBytes(status.totalBytes || 0);
         setThroughputBps(status.throughputBps || 0);
+        setDurationIsEstimated(status.durationIsEstimated || false);
 
         if (status.status === "completed" && !watchMode) {
           setProcessing(false);
@@ -976,6 +978,35 @@ function VideoProcessor() {
 
             {/* Progress Panel - Always visible */}
             <div className="glass-panel p-4 sm:p-5 md:p-6 space-y-4">
+              {/* Blind Mode Warning */}
+              {processing && durationIsEstimated && (
+                <div
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs sm:text-sm"
+                  style={{
+                    background: "rgba(251, 191, 36, 0.1)",
+                    border: "1px solid rgba(251, 191, 36, 0.3)",
+                    color: "var(--color-warning)",
+                  }}
+                >
+                  <svg
+                    className="w-4 h-4 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                  <span>
+                    <strong>Duration unknown</strong> — File metadata is corrupt. Using quality-based encoding. Progress is estimated.
+                  </span>
+                </div>
+              )}
+
               {/* Stats Row */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                 {/* Left: File info or idle state */}
@@ -997,7 +1028,7 @@ function VideoProcessor() {
                     style={{ color: "var(--color-text-muted)" }}
                   >
                     {processing
-                      ? `File ${currentFileIndex}/${totalFiles}${totalChunks > 1 ? ` • Chunk ${currentChunk}/${totalChunks}` : ""}`
+                      ? `File ${currentFileIndex}/${totalFiles}${totalChunks > 1 ? ` • Chunk ${currentChunk}/${totalChunks}` : ""}${durationIsEstimated ? " • Quality mode" : ""}`
                       : files.length > 0
                         ? `${files.length} file(s) queued`
                         : "Select directories to begin"}
@@ -1006,7 +1037,7 @@ function VideoProcessor() {
 
                 {/* Right: Stats */}
                 <div className="flex items-center gap-5 sm:gap-6 flex-shrink-0">
-                  {/* Data processed */}
+                  {/* Data processed - show differently when duration is estimated */}
                   <div className="text-center sm:text-right">
                     <p
                       className="text-sm sm:text-base font-mono font-medium"
@@ -1016,45 +1047,53 @@ function VideoProcessor() {
                           : "var(--color-text-muted)",
                       }}
                     >
-                      {processing && totalBytes > 0
-                        ? `${formatBytes(processedBytes)} / ${formatBytes(totalBytes)}`
-                        : "— / —"}
+                      {processing && durationIsEstimated
+                        ? `${formatBytes(processedBytes)} processed`
+                        : processing && totalBytes > 0
+                          ? `${formatBytes(processedBytes)} / ${formatBytes(totalBytes)}`
+                          : "— / —"}
                     </p>
-                    <p className="stat-label text-xs mt-0.5">Data</p>
+                    <p className="stat-label text-xs mt-0.5">
+                      {durationIsEstimated ? "Data (est.)" : "Data"}
+                    </p>
                   </div>
 
-                  {/* Throughput */}
+                  {/* Throughput - hide when duration is estimated (unreliable) */}
                   <div className="text-center sm:text-right">
                     <p
                       className="stat-value text-sm sm:text-base"
                       style={{
                         color:
-                          processing && throughputBps > 0
+                          processing && throughputBps > 0 && !durationIsEstimated
                             ? "var(--color-text)"
                             : "var(--color-text-muted)",
                       }}
                     >
-                      {processing && throughputBps > 0
-                        ? formatThroughput(throughputBps)
-                        : "—"}
+                      {processing && durationIsEstimated
+                        ? "—"
+                        : processing && throughputBps > 0
+                          ? formatThroughput(throughputBps)
+                          : "—"}
                     </p>
                     <p className="stat-label text-xs mt-0.5">Throughput</p>
                   </div>
 
-                  {/* Speed */}
+                  {/* Speed - hide when duration is estimated (unreliable) */}
                   <div className="text-center sm:text-right">
                     <p
                       className="stat-value text-base sm:text-lg"
                       style={{
                         color:
-                          processing && processingSpeed !== undefined
+                          processing && processingSpeed !== undefined && !durationIsEstimated
                             ? "var(--color-accent)"
                             : "var(--color-text-muted)",
                       }}
                     >
-                      {processing && processingSpeed !== undefined
-                        ? `${processingSpeed.toFixed(2)}x`
-                        : "—"}
+                      {processing && durationIsEstimated
+                        ? "—"
+                        : processing && processingSpeed !== undefined
+                          ? `${processingSpeed.toFixed(2)}x`
+                          : "—"}
                     </p>
                     <p className="stat-label text-xs mt-0.5">Speed</p>
                   </div>
@@ -1072,14 +1111,21 @@ function VideoProcessor() {
                     Overall
                   </span>
                   <div className="flex-1">
-                    <ProgressBar percent={overallProgress} color="cyan" />
+                    <ProgressBar 
+                      percent={durationIsEstimated && processing ? 100 : overallProgress} 
+                      color={durationIsEstimated ? "orange" : "cyan"} 
+                    />
                   </div>
                   <span
                     className="text-xs sm:text-sm w-28 sm:w-36 text-right font-mono"
                     style={{ color: "var(--color-text-muted)" }}
                   >
-                    {processing ? `${overallProgress}%` : "0%"}
-                    {processing && eta !== undefined && eta >= 0 && (
+                    {processing && durationIsEstimated
+                      ? "Processing..."
+                      : processing
+                        ? `${overallProgress}%`
+                        : "0%"}
+                    {processing && !durationIsEstimated && eta !== undefined && eta >= 0 && (
                       <span className="ml-2 opacity-75">{formatTime(eta)}</span>
                     )}
                   </span>
@@ -1094,13 +1140,20 @@ function VideoProcessor() {
                     File
                   </span>
                   <div className="flex-1">
-                    <ProgressBar percent={fileProgress} color="green" />
+                    <ProgressBar 
+                      percent={durationIsEstimated && processing ? 100 : fileProgress} 
+                      color={durationIsEstimated ? "orange" : "green"} 
+                    />
                   </div>
                   <span
                     className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"
                     style={{ color: "var(--color-text-muted)" }}
                   >
-                    {processing ? `${fileProgress}%` : "0%"}
+                    {processing && durationIsEstimated
+                      ? "Processing..."
+                      : processing
+                        ? `${fileProgress}%`
+                        : "0%"}
                   </span>
                 </div>
 
@@ -1113,7 +1166,10 @@ function VideoProcessor() {
                     Chunk
                   </span>
                   <div className="flex-1">
-                    <ProgressBar percent={chunkProgress} color="orange" />
+                    <ProgressBar 
+                      percent={durationIsEstimated && processing ? 100 : chunkProgress} 
+                      color="orange" 
+                    />
                   </div>
                   <span
                     className="text-xs sm:text-sm w-20 sm:w-28 text-right font-mono"

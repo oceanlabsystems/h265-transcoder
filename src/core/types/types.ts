@@ -35,6 +35,7 @@ export interface ProcessStatus {
   processedBytes?: number; // Total bytes processed so far
   totalBytes?: number; // Total bytes to process
   throughputBps?: number; // Current throughput in bytes per second
+  durationIsEstimated?: boolean; // True when file duration was estimated due to corrupt metadata
 }
 
 export interface ProgressCallback {
@@ -50,6 +51,7 @@ export interface ProgressCallback {
     currentPositionSeconds?: number; // Current position in input stream (from GStreamer)
     fileDuration?: number; // Total duration of input file in seconds
     outputBytes?: number; // Total output bytes written so far (for reference)
+    durationIsEstimated?: boolean; // True when duration was estimated due to corrupt metadata
   }): void;
 }
 

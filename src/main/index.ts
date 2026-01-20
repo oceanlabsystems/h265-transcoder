@@ -579,6 +579,7 @@ function setupIpcHandlers(): void {
                   processedBytes: totalProcessedBytes,
                   totalBytes,
                   throughputBps: progressThroughput,
+                  durationIsEstimated: progressStatus.durationIsEstimated,
                 });
               },
               batchAbortController?.signal
@@ -966,6 +967,7 @@ async function processWatchQueue(): Promise<void> {
             chunkEta: progressStatus.chunkEta,
             fileEta: progressStatus.fileEta,
             processingSpeed: progressStatus.processingSpeed,
+            durationIsEstimated: progressStatus.durationIsEstimated,
           });
         }
       );

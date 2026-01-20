@@ -25,6 +25,48 @@ function formatTime(seconds: number): string {
 }
 
 /**
+ * Maps compression ratio to quality values for different encoders.
+ * Used when duration is estimated/unreliable and we can't calculate accurate bitrate targets.
+ * Lower quality values = better visual quality (less compression).
+ * 
+ * Quality mapping is based on empirical testing and encoder documentation:
+ * - QSV ICQ (Intelligent Constant Quality): 1-51, lower is better, ~20-25 is high quality
+ * - NVENC QP (Quantization Parameter): 0-51, lower is better, ~20-25 is high quality
+ * - VideoToolbox quality: 0.0-1.0, higher is better
+ * - x265 CRF (Constant Rate Factor): 0-51, lower is better, ~22-28 is typical
+ */
+interface QualityValues {
+  qsvIcq: number;      // Intel QSV ICQ quality (1-51, lower = better)
+  nvencQp: number;     // NVIDIA QP constant (0-51, lower = better)
+  vtQuality: number;   // Apple VideoToolbox quality (0.0-1.0, higher = better)
+  x265Crf: number;     // x265 CRF value (0-51, lower = better)
+}
+
+function getQualityForCompressionRatio(compressionRatio: number): QualityValues {
+  // Map compression ratios to quality values
+  // Higher compression = lower quality = higher QP/CRF values (or lower VT quality)
+  if (compressionRatio <= 1) {
+    // Near-lossless
+    return { qsvIcq: 18, nvencQp: 18, vtQuality: 0.75, x265Crf: 18 };
+  } else if (compressionRatio <= 2) {
+    // High quality (2x compression)
+    return { qsvIcq: 22, nvencQp: 22, vtQuality: 0.65, x265Crf: 22 };
+  } else if (compressionRatio <= 4) {
+    // Good quality (4x compression)
+    return { qsvIcq: 26, nvencQp: 26, vtQuality: 0.50, x265Crf: 26 };
+  } else if (compressionRatio <= 5) {
+    // Balanced (5x compression)
+    return { qsvIcq: 28, nvencQp: 28, vtQuality: 0.45, x265Crf: 28 };
+  } else if (compressionRatio <= 10) {
+    // Smaller files (10x compression)
+    return { qsvIcq: 32, nvencQp: 32, vtQuality: 0.35, x265Crf: 32 };
+  } else {
+    // Maximum compression (20x+)
+    return { qsvIcq: 38, nvencQp: 38, vtQuality: 0.25, x265Crf: 38 };
+  }
+}
+
+/**
  * Fallback: Try to get video duration using ffprobe (if available)
  */
 function tryFfprobeDuration(inputPath: string): Promise<number | null> {
@@ -591,6 +633,36 @@ export function processVideoFileWithContext(
       // Calculate input bitrate: (fileSizeBytes * 8 bits) / durationSeconds / 1000 = kbps
       const inputBitrateBps = (inputFileSize * 8) / fileDuration;
       inputBitrateKbps = inputBitrateBps / 1000; // Convert to kbps
+      
+      // BITRATE SANITY CHECK: Detect corrupted duration metadata
+      // If calculated bitrate is impossibly high (> 500 Mbps), the duration is almost certainly wrong.
+      // Typical max bitrates: ProRes 4444 XQ 4K ~330 Mbps, ProRes RAW ~400 Mbps
+      // Anything > 500 Mbps indicates the duration metadata is corrupt (e.g., not finalized recording)
+      const inputBitrateMbps = inputBitrateKbps / 1000;
+      const MAX_REASONABLE_BITRATE_MBPS = 500;
+      
+      if (inputBitrateMbps > MAX_REASONABLE_BITRATE_MBPS && !durationIsEstimated) {
+        debugLogger.warn(
+          `[Bitrate Sanity Check] Calculated bitrate ${inputBitrateMbps.toFixed(0)} Mbps exceeds maximum reasonable bitrate (${MAX_REASONABLE_BITRATE_MBPS} Mbps). ` +
+            `Duration metadata is likely corrupt (file: ${(inputFileSize / (1024 * 1024 * 1024)).toFixed(2)}GB, reported duration: ${fileDuration.toFixed(2)}s). ` +
+            `Falling back to file-size-based duration estimation...`
+        );
+        
+        // Re-estimate duration from file size using conservative bitrate assumption
+        const estimatedBitrateMbps = 20; // Conservative estimate for typical video
+        fileDuration = (inputFileSize * 8) / (estimatedBitrateMbps * 1000000);
+        durationIsEstimated = true;
+        totalChunks = Math.ceil(fileDuration / chunkDuration);
+        
+        // Recalculate bitrate with estimated duration
+        inputBitrateKbps = estimatedBitrateMbps * 1000; // Use the estimated bitrate
+        
+        debugLogger.info(
+          `[Bitrate Sanity Check] Estimated duration: ${Math.round(fileDuration)}s (${Math.round(fileDuration / 60)} minutes), ` +
+            `Using assumed bitrate: ${estimatedBitrateMbps} Mbps, Will create ${totalChunks} chunk(s)`
+        );
+      }
+      
       debugLogger.info(
         `[Video Info] Input bitrate: ${inputBitrateKbps.toFixed(0)} kbps (${(inputBitrateKbps / 1000).toFixed(2)} Mbps)`
       );
@@ -692,41 +764,41 @@ export function processVideoFileWithContext(
     if (encoder === "vtenc_h265") {
       // VideoToolbox encoder configuration
       // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/applemedia/vtenc_h265.html
-      // 
-      // Quality-based encoding with bitrate constraint for reliable compression.
-      // Quality property: 0.0 (lowest) to 1.0 (highest)
-      //
-      // EMPIRICAL TESTING RESULTS (v1.4.12):
-      // - quality 0.975 → ~0.55x compression (files grow larger than input!)
-      // - quality 0.82  → ~1.0x compression (no compression at all)
-      // - quality 0.707 → ~18x compression (too aggressive)
-      //
-      // The relationship is highly non-linear. Using logarithmic mapping:
-      //   quality = 0.80 - log2(compressionRatio) * 0.12
-      //
-      // This gives:
-      //   1x compression → quality 0.80 (near lossless)
-      //   2x compression → quality 0.68 (high quality with actual compression)
-      //   4x compression → quality 0.56 (good quality)
-      //   5x compression → quality 0.52 (good quality)
-      //   10x compression → quality 0.40 (medium quality)
-      //   20x compression → quality 0.28 (lower quality)
       
       const compressionRatio = config.compressionRatio!;
-      // Logarithmic quality mapping for more predictable compression
-      const qualityValue = Math.max(0.25, Math.min(0.80, 0.80 - Math.log2(compressionRatio) * 0.12));
       
-      debugLogger.info(
-        `[VideoToolbox] Compression: ${compressionRatio}x → Quality: ${qualityValue.toFixed(3)}, Max bitrate: ${targetBitrateKbps} kbps`
-      );
-      encoderArgs = [
-        encoder,
-        `quality=${qualityValue.toFixed(3)}`,
-        // Add max-bitrate constraint to help ensure target compression is achieved
-        `max-bitrate=${targetBitrateKbps}`,
-        // Enable B-frames for better compression efficiency
-        "allow-frame-reordering=true",
-      ];
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use quality-based encoding
+        // Quality-based encoding doesn't depend on knowing accurate input bitrate
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[VideoToolbox] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → Quality: ${qualityValues.vtQuality.toFixed(2)}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          `quality=${qualityValues.vtQuality.toFixed(3)}`,
+          "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        // rate-control options: constant-bitrate, average-bitrate, variable-bitrate
+        const qualityFloor = 0.5;
+        
+        debugLogger.info(
+          `[VideoToolbox] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          `bitrate=${targetBitrateKbps}`,
+          "rate-control=constant-bitrate",  // Enforce bitrate target for predictable file sizes
+          `quality=${qualityFloor}`,         // Visual quality floor
+          "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
+        ];
+      }
+      
       debugLogger.logEncoderConfig(
         encoder,
         compressionRatio,
@@ -735,66 +807,140 @@ export function processVideoFileWithContext(
         encoderArgs
       );
     } else if (encoder === "nvh265enc") {
-      // NVIDIA NVENC - bitrate works directly with default rate control
-      debugLogger.info(
-        `[NVENC] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
-      );
-      encoderArgs = [
-        encoder,
-        `bitrate=${targetBitrateKbps}`,
-      ];
+      // NVIDIA NVENC encoder configuration
+      // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/nvcodec/nvh265enc.html
+      // rc-mode options: default, constqp, cbr, vbr, vbr-minqp
+      
+      const compressionRatio = config.compressionRatio!;
+      
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use constant QP encoding
+        // QP-based encoding doesn't depend on knowing accurate input bitrate
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[NVENC] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → QP: ${qualityValues.nvencQp}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rc-mode=constqp",                  // Constant QP mode for quality-based encoding
+          `qp-const=${qualityValues.nvencQp}`, // Constant quantization parameter
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        debugLogger.info(
+          `[NVENC] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rc-mode=cbr",                      // Constant bitrate mode for predictable sizes
+          `bitrate=${targetBitrateKbps}`,
+          `max-bitrate=${targetBitrateKbps}`, // Cap at target to prevent overshoots
+        ];
+      }
+      
       debugLogger.logEncoderConfig(
         encoder,
-        config.compressionRatio!,
+        compressionRatio,
         targetBitrateKbps,
         inputBitrateKbps,
         encoderArgs
       );
     } else if (encoder === "qsvh265enc") {
-      // Intel Quick Sync - bitrate works directly with default rate control
-      debugLogger.info(
-        `[QSV] Compression: ${config.compressionRatio}x → Target bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
-      );
-      encoderArgs = [
-        encoder,
-        `bitrate=${targetBitrateKbps}`,
-      ];
+      // Intel Quick Sync encoder configuration
+      // Per GStreamer docs, QSV encoders support rate-control property
+      // rate-control options: cqp, icq, vbr, cbr, vbr_la, icq_la, vcm, qvbr
+      
+      const compressionRatio = config.compressionRatio!;
+      
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use ICQ (Intelligent Constant Quality)
+        // ICQ provides consistent quality regardless of input bitrate knowledge
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[QSV] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → ICQ Quality: ${qualityValues.qsvIcq}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=icq",                 // Intelligent Constant Quality mode
+          `icq-quality=${qualityValues.qsvIcq}`, // ICQ quality value (1-51, lower = better)
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        debugLogger.info(
+          `[QSV] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=cbr",                 // Constant bitrate mode for predictable sizes
+          `bitrate=${targetBitrateKbps}`,
+          `max-bitrate=${targetBitrateKbps}`, // Cap at target to prevent overshoots
+        ];
+      }
+      
       debugLogger.logEncoderConfig(
         encoder,
-        config.compressionRatio!,
+        compressionRatio,
         targetBitrateKbps,
         inputBitrateKbps,
         encoderArgs
       );
     } else if (encoder === "x265enc") {
-      // Software x265 - use bitrate mode (NOT CRF/CQP)
-      // Important: Don't use CRF/CQP options when targeting bitrate
-      // 
-      // NOTE: x265enc has a maximum bitrate limit. Cap at 100,000 kbps (100 Mbps)
-      // to avoid "value out of range" errors. This is more than sufficient for
-      // most video encoding scenarios including 4K.
-      const x265MaxBitrate = 100000; // 100 Mbps max for x265enc
-      const x265Bitrate = Math.min(targetBitrateKbps, x265MaxBitrate);
+      // Software x265 encoder configuration
+      // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/x265/index.html
       
-      if (targetBitrateKbps > x265MaxBitrate) {
-        debugLogger.warn(
-          `[x265] Target bitrate ${targetBitrateKbps} kbps exceeds x265enc maximum. Capping to ${x265MaxBitrate} kbps (100 Mbps)`
+      const compressionRatio = config.compressionRatio!;
+      
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use CRF (Constant Rate Factor)
+        // CRF provides consistent quality regardless of input bitrate knowledge
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[x265] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → CRF: ${qualityValues.x265Crf}`
         );
+        
+        encoderArgs = [
+          encoder,
+          "speed-preset=veryfast",  // Faster encoding
+          "tune=fastdecode",        // Optimize for faster decoding
+          `option-string=crf=${qualityValues.x265Crf}`,  // CRF mode for quality-based encoding
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use VBV-constrained bitrate for predictable file sizes
+        // NOTE: x265enc has a maximum bitrate limit. Cap at 100,000 kbps (100 Mbps)
+        const x265MaxBitrate = 100000;
+        const x265Bitrate = Math.min(targetBitrateKbps, x265MaxBitrate);
+        const vbvBufsize = x265Bitrate * 2; // 2 second buffer at target bitrate
+        
+        if (targetBitrateKbps > x265MaxBitrate) {
+          debugLogger.warn(
+            `[x265] Target bitrate ${targetBitrateKbps} kbps exceeds x265enc maximum. Capping to ${x265MaxBitrate} kbps (100 Mbps)`
+          );
+        }
+        
+        debugLogger.info(
+          `[x265] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${x265Bitrate} kbps (${(x265Bitrate / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          `bitrate=${x265Bitrate}`,
+          "speed-preset=veryfast",
+          "tune=fastdecode",
+          `option-string=vbv-maxrate=${x265Bitrate}:vbv-bufsize=${vbvBufsize}`,
+        ];
       }
       
-      debugLogger.info(
-        `[x265] Compression: ${config.compressionRatio}x → Target bitrate: ${x265Bitrate} kbps (${(x265Bitrate / 1000).toFixed(2)} Mbps)`
-      );
-      encoderArgs = [
-        encoder,
-        `bitrate=${x265Bitrate}`,
-        "speed-preset=veryfast",  // Faster encoding while still respecting bitrate target
-        "tune=fastdecode",        // Optimize for faster encoding/decoding
-      ];
       debugLogger.logEncoderConfig(
         encoder,
-        config.compressionRatio!,
-        x265Bitrate, // Use capped bitrate in log
+        compressionRatio,
+        targetBitrateKbps,
         inputBitrateKbps,
         encoderArgs
       );

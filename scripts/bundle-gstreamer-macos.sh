@@ -351,6 +351,68 @@ for libexec_bin in "$OUT_ROOT/libexec/gstreamer-1.0/"*; do
 done
 
 echo ""
+echo "Re-signing binaries (required after install_name_tool modifications)..."
+
+# After modifying binaries with install_name_tool, their code signatures are invalidated.
+# macOS will kill unsigned binaries, so we need to re-sign them.
+# Using ad-hoc signing (--sign -) which doesn't require a developer certificate.
+
+sign_binary() {
+    local binary="$1"
+    if [[ -f "$binary" ]]; then
+        # Remove any existing signature and re-sign with ad-hoc signature
+        codesign --force --sign - "$binary" 2>/dev/null && return 0
+        return 1
+    fi
+    return 1
+}
+
+# Sign all binaries
+echo "  Signing bin/* ..."
+SIGN_COUNT=0
+SIGN_FAIL=0
+for bin in "$OUT_ROOT/bin/"*; do
+    [[ -f "$bin" ]] || continue
+    if sign_binary "$bin"; then
+        SIGN_COUNT=$((SIGN_COUNT + 1))
+    else
+        SIGN_FAIL=$((SIGN_FAIL + 1))
+        echo "    ⚠ Failed to sign: $(basename "$bin")"
+    fi
+done
+echo "    Signed $SIGN_COUNT binaries"
+
+# Sign all libraries
+echo "  Signing lib/*.dylib ..."
+SIGN_COUNT=0
+for lib in "$OUT_ROOT/lib/"*.dylib; do
+    [[ -f "$lib" ]] || continue
+    if sign_binary "$lib"; then
+        SIGN_COUNT=$((SIGN_COUNT + 1))
+    fi
+done
+echo "    Signed $SIGN_COUNT libraries"
+
+# Sign all plugins
+echo "  Signing lib/gstreamer-1.0/*.dylib ..."
+SIGN_COUNT=0
+for plugin in "$OUT_ROOT/lib/gstreamer-1.0/"*.dylib; do
+    [[ -f "$plugin" ]] || continue
+    if sign_binary "$plugin"; then
+        SIGN_COUNT=$((SIGN_COUNT + 1))
+    fi
+done
+echo "    Signed $SIGN_COUNT plugins"
+
+# Sign libexec binaries
+echo "  Signing libexec/* ..."
+for libexec_bin in "$OUT_ROOT/libexec/gstreamer-1.0/"*; do
+    [[ -f "$libexec_bin" ]] || continue
+    sign_binary "$libexec_bin"
+done
+echo "    Done"
+
+echo ""
 echo "Verifying bundle..."
 
 # Test that gst-inspect can run
@@ -364,6 +426,7 @@ if "$OUT_ROOT/bin/gst-inspect-1.0" --version >/dev/null 2>&1; then
     echo "    $VERSION"
 else
     echo "  ⚠ gst-inspect-1.0 test failed (may still work at runtime)"
+    echo "    Try running manually: $OUT_ROOT/bin/gst-inspect-1.0 --version"
 fi
 
 # Check for VideoToolbox encoder

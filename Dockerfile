@@ -6,7 +6,7 @@ FROM node:20-slim
 LABEL maintainer="Oceanlab Systems <support@oceanlabsystems.com>"
 LABEL description="H265 Video Transcoder - Automated batch transcoding service"
 
-# Install GStreamer
+# Install GStreamer and VA-API support for hardware encoding
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
+    gstreamer1.0-vaapi \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

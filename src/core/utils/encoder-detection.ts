@@ -7,12 +7,20 @@ import { debugLogger } from "./debug-logger";
 function shouldFallbackToSystemGStreamer(stderr: string): boolean {
   const s = (stderr || "").toLowerCase();
   return (
-    // glibc mismatch (common when bundling on newer distros)
+    // glibc mismatch (common when bundling on newer distros) - Linux
     s.includes("glibc_") ||
     (s.includes("libc.so.6") && s.includes("version") && s.includes("not found")) ||
-    // loader errors
+    // loader errors - Linux
     s.includes("error while loading shared libraries") ||
-    s.includes("no such file or directory") // often printed by loader for missing interpreter/lib
+    s.includes("no such file or directory") || // often printed by loader for missing interpreter/lib
+    // dyld errors - macOS
+    s.includes("library not loaded") ||
+    s.includes("dyld") ||
+    s.includes("reason: image not found") ||
+    s.includes("mach-o") ||
+    // Homebrew path issues on macOS
+    s.includes("/opt/homebrew/") ||
+    s.includes("/usr/local/opt/")
   );
 }
 
@@ -72,7 +80,7 @@ async function spawnInspectAndCheck(
 /**
  * Available encoder types
  */
-export type EncoderType = "x265" | "nvh265" | "qsvh265" | "vtenc";
+export type EncoderType = "x265" | "nvh265" | "qsvh265" | "vtenc" | "vaapih265" | "msdkh265";
 
 /**
  * Information about a detected encoder
@@ -116,6 +124,22 @@ const ALL_ENCODERS: Omit<EncoderInfo, "available" | "recommended">[] = [
     gstreamerElement: "qsvh265enc",
     priority: 90,
     platform: "all", // Available on Windows/Linux/macOS with Intel GPU
+  },
+  {
+    id: "msdkh265",
+    name: "Intel Media SDK",
+    description: "Intel Media SDK hardware encoding (recommended for Linux)",
+    gstreamerElement: "msdkh265enc",
+    priority: 88, // Preferred Intel encoder on Linux (more stable than VA-API)
+    platform: "linux",
+  },
+  {
+    id: "vaapih265",
+    name: "VA-API (Intel/AMD)",
+    description: "VA-API hardware encoding for Intel/AMD GPUs on Linux",
+    gstreamerElement: "vaapih265enc",
+    priority: 85, // Below MSDK but above software
+    platform: "linux",
   },
   {
     id: "vtenc",
@@ -215,8 +239,10 @@ async function ensureRegistryInitialized(
 
   if (first.code === 0) return true;
 
+  // Linux/macOS: fallback to system GStreamer if bundled version fails
+  const isFallbackPlatform = process.platform === "linux" || process.platform === "darwin";
   if (
-    process.platform === "linux" &&
+    isFallbackPlatform &&
     binPath &&
     inspectPath !== inspectExecutable &&
     shouldFallbackToSystemGStreamer(first.stderr)
@@ -225,10 +251,34 @@ async function ensureRegistryInitialized(
       "[Encoder Detection] Bundled GStreamer appears incompatible; retrying registry init with system GStreamer...",
       context
     );
+    
+    // On macOS, also try the system framework path
+    let systemEnv = { ...process.env };
+    if (process.platform === "darwin") {
+      const frameworkPath = "/Library/Frameworks/GStreamer.framework/Versions/1.0";
+      const frameworkBin = `${frameworkPath}/bin`;
+      const frameworkLib = `${frameworkPath}/lib`;
+      const frameworkPlugins = `${frameworkLib}/gstreamer-1.0`;
+      
+      if (fs.existsSync(frameworkBin)) {
+        systemEnv = {
+          ...systemEnv,
+          PATH: `${frameworkBin}:${systemEnv.PATH || ""}`,
+          DYLD_LIBRARY_PATH: `${frameworkLib}:${systemEnv.DYLD_LIBRARY_PATH || ""}`,
+          GST_PLUGIN_PATH: frameworkPlugins,
+          GST_PLUGIN_SYSTEM_PATH: frameworkPlugins,
+        };
+        debugLogger.logInit(
+          `[Encoder Detection] Using macOS GStreamer framework for registry init`,
+          context
+        );
+      }
+    }
+    
     const second = await spawnInspectAndCheck(
       inspectExecutable,
       ["--version"],
-      { ...process.env },
+      systemEnv,
       60000
     );
     debugLogger.logInit(
@@ -263,8 +313,8 @@ async function checkGStreamerElement(
 
     let inspectPath = inspectExecutable;
 
-    // Debug: Log context and paths (first element only to avoid spam)
-    if (elementName === "nvh265enc" || elementName === "x265enc") {
+    // Debug: Log context and paths (for key elements to avoid spam)
+    if (elementName === "nvh265enc" || elementName === "x265enc" || elementName === "vaapih265enc") {
       debugLogger.logInit(`[Encoder Detection] === PATH DEBUG ===`);
       debugLogger.logInit(
         `[Encoder Detection] Context: isPackaged=${context.isPackaged}`
@@ -350,7 +400,7 @@ async function checkGStreamerElement(
     debugLogger.logInit(`[Encoder Detection] Using inspectPath: ${inspectPath}`);
     
     // Log critical GStreamer environment variables for debugging
-    if (elementName === "nvh265enc" || elementName === "x265enc") {
+    if (elementName === "nvh265enc" || elementName === "x265enc" || elementName === "vaapih265enc") {
       debugLogger.logInit(
         `[Encoder Detection] GST_PLUGIN_SCANNER_1_0: ${processEnv.GST_PLUGIN_SCANNER_1_0 || "(not set)"}`
       );
@@ -384,21 +434,55 @@ async function checkGStreamerElement(
 
       if (existsFirst) return resolve(true);
 
-      // Linux: if bundled GStreamer exists but can't execute (glibc/loader), fall back to system tools.
-      if (
-        process.platform === "linux" &&
+      // Linux/macOS: if bundled GStreamer exists, also try system GStreamer as fallback.
+      // This handles two cases:
+      // 1. Bundled GStreamer can't execute (glibc/loader errors on Linux, dyld errors on macOS)
+      // 2. Bundled GStreamer doesn't have the element (e.g., vaapih265enc which requires system drivers)
+      const isFallbackPlatform = process.platform === "linux" || process.platform === "darwin";
+      const shouldTrySystem =
+        isFallbackPlatform &&
         binPath &&
         inspectPath !== inspectExecutable &&
-        shouldFallbackToSystemGStreamer(first.stderr)
-      ) {
+        (shouldFallbackToSystemGStreamer(first.stderr) || !existsFirst);
+
+      if (shouldTrySystem) {
+        const reason = shouldFallbackToSystemGStreamer(first.stderr)
+          ? "Bundled GStreamer appears incompatible"
+          : "Element not found in bundled GStreamer";
         debugLogger.logInit(
-          `[Encoder Detection] Bundled GStreamer appears incompatible; retrying ${elementName} check with system GStreamer...`,
+          `[Encoder Detection] ${reason}; retrying ${elementName} check with system GStreamer...`,
           context
         );
+        
+        // On macOS, also try the system framework path
+        let systemEnv = { ...process.env };
+        if (process.platform === "darwin") {
+          // Add framework paths for macOS system GStreamer
+          const frameworkPath = "/Library/Frameworks/GStreamer.framework/Versions/1.0";
+          const frameworkBin = `${frameworkPath}/bin`;
+          const frameworkLib = `${frameworkPath}/lib`;
+          const frameworkPlugins = `${frameworkLib}/gstreamer-1.0`;
+          
+          // Check if framework exists
+          if (fs.existsSync(frameworkBin)) {
+            systemEnv = {
+              ...systemEnv,
+              PATH: `${frameworkBin}:${systemEnv.PATH || ""}`,
+              DYLD_LIBRARY_PATH: `${frameworkLib}:${systemEnv.DYLD_LIBRARY_PATH || ""}`,
+              GST_PLUGIN_PATH: frameworkPlugins,
+              GST_PLUGIN_SYSTEM_PATH: frameworkPlugins,
+            };
+            debugLogger.logInit(
+              `[Encoder Detection] Using macOS GStreamer framework at ${frameworkPath}`,
+              context
+            );
+          }
+        }
+        
         const second = await spawnInspectAndCheck(
           inspectExecutable,
           [elementName],
-          { ...process.env },
+          systemEnv,
           timeoutMs
         );
         const existsSecond =
@@ -525,6 +609,16 @@ export async function hasHardwareEncoder(
 
   // Check Intel QSV
   if (await checkGStreamerElement("qsvh265enc", context)) {
+    return true;
+  }
+
+  // Check Intel MSDK (Linux)
+  if (await checkGStreamerElement("msdkh265enc", context)) {
+    return true;
+  }
+
+  // Check VA-API (Intel/AMD on Linux)
+  if (await checkGStreamerElement("vaapih265enc", context)) {
     return true;
   }
 

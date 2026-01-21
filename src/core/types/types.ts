@@ -11,7 +11,7 @@ export interface BatchProcessConfig {
   outputDirectory: string;
   chunkDurationMinutes: number;
   outputFormat: 'mp4' | 'mkv' | 'mov';
-  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc';
+  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc' | 'vaapih265' | 'msdkh265';
   compressionRatio?: number; // Target compression ratio (1, 2, 3, 4, 5, 10, 20). 2x = half the size (recommended)
   speedPreset?: 'ultrafast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow';
 }

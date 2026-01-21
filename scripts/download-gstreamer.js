@@ -765,6 +765,47 @@ function verifyAndCopyEssentialTools(extractDir) {
   }
 }
 
+/**
+ * Bundle GStreamer for macOS using the dedicated bundling script.
+ * This script handles:
+ * - Extracting from .pkg or using installed framework
+ * - Copying all required dylibs
+ * - Rewriting library paths with install_name_tool
+ */
+async function bundleMacOSGStreamer(extractDir) {
+  const bundleScript = path.join(__dirname, "bundle-gstreamer-macos.sh");
+  
+  if (!fs.existsSync(bundleScript)) {
+    throw new Error(`Bundle script not found: ${bundleScript}`);
+  }
+  
+  console.log("Running macOS GStreamer bundling script...");
+  console.log("This will collect dependencies and rewrite library paths.\n");
+  
+  try {
+    execSync(`bash "${bundleScript}"`, {
+      stdio: "inherit",  // Show output in real-time
+      timeout: 600000,   // 10 minute timeout (bundling can take a while)
+      cwd: path.dirname(__dirname),
+    });
+    
+    // Verify the bundle was created
+    const gstLaunchPath = path.join(extractDir, "bin", "gst-launch-1.0");
+    if (fs.existsSync(gstLaunchPath)) {
+      console.log("\n✓ macOS GStreamer bundle created successfully");
+      return true;
+    } else {
+      throw new Error("Bundle script completed but gst-launch-1.0 not found");
+    }
+  } catch (error) {
+    if (error.status !== undefined) {
+      // Script exited with error
+      throw new Error(`Bundle script failed with exit code ${error.status}`);
+    }
+    throw error;
+  }
+}
+
 async function extractPkg(pkgPath, extractDir) {
   console.log(`Extracting ${pkgPath}...`);
 
@@ -917,74 +958,109 @@ async function setupGStreamer(targetPlatform) {
   const platform = targetPlatform || process.platform;
 
   if (platform === "darwin") {
-    // macOS setup
-    console.log("Setting up GStreamer for macOS...");
+    // macOS setup - use dedicated bundling script for proper dylib handling
+    console.log("Setting up GStreamer for macOS...\n");
 
     // Create output directory
     if (!fs.existsSync(OUTPUT_DIR)) {
       fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     }
 
-    const url = GSTREAMER_URLS.darwin.universal;
-    const pkgFileName = path.basename(url);
-    const pkgPath = path.join(OUTPUT_DIR, pkgFileName);
     const extractDir = path.join(OUTPUT_DIR, "macos");
-
-    // Check if already extracted
     const gstLaunchPath = path.join(extractDir, "bin", "gst-launch-1.0");
+
+    // Check if already bundled and working
     if (fs.existsSync(gstLaunchPath)) {
-      console.log("GStreamer already extracted. Skipping download.");
+      // Verify the bundle works (check for dylib issues)
+      try {
+        execSync(`"${gstLaunchPath}" --version`, {
+          stdio: "pipe",
+          timeout: 10000,
+          env: {
+            ...process.env,
+            DYLD_LIBRARY_PATH: path.join(extractDir, "lib"),
+            GST_PLUGIN_PATH: path.join(extractDir, "lib", "gstreamer-1.0"),
+          },
+        });
+        console.log("GStreamer already bundled and working. Skipping setup.");
+        return;
+      } catch (e) {
+        console.log("Existing bundle has issues, will re-bundle...");
+        // Continue to re-bundle
+      }
+    }
+
+    // Must run on macOS for proper bundling (need install_name_tool)
+    if (process.platform !== "darwin") {
+      console.log("⚠️  macOS GStreamer bundling must be done on macOS.");
+      console.log("This is because we need install_name_tool to rewrite dylib paths.\n");
+      
+      // Download the .pkg for later use
+      const url = GSTREAMER_URLS.darwin.universal;
+      const pkgFileName = path.basename(url);
+      const pkgPath = path.join(OUTPUT_DIR, pkgFileName);
+      
+      if (!fs.existsSync(pkgPath)) {
+        console.log("Downloading GStreamer .pkg for later bundling on macOS...");
+        await downloadFile(url, pkgPath);
+      }
+      
+      console.log("\nTo complete macOS setup:");
+      console.log("  1. On a macOS machine, install GStreamer from:");
+      console.log("     https://gstreamer.freedesktop.org/download/");
+      console.log("  2. Run: npm run download-gstreamer");
+      console.log("     (or: bash scripts/bundle-gstreamer-macos.sh)");
+      console.log("  3. The script will bundle GStreamer with proper dylib paths");
       return;
     }
 
-    // Download if not exists
-    if (!fs.existsSync(pkgPath)) {
+    // On macOS: use the bundling script
+    // First, check if GStreamer framework is installed or .pkg exists
+    const frameworkPath = "/Library/Frameworks/GStreamer.framework/Versions/1.0";
+    const homebrewArmPath = "/opt/homebrew/opt/gstreamer";
+    const homebrewIntelPath = "/usr/local/opt/gstreamer";
+    const url = GSTREAMER_URLS.darwin.universal;
+    const pkgFileName = path.basename(url);
+    const pkgPath = path.join(OUTPUT_DIR, pkgFileName);
+    
+    const hasFramework = fs.existsSync(frameworkPath);
+    const hasHomebrew = fs.existsSync(homebrewArmPath) || fs.existsSync(homebrewIntelPath);
+    const hasPkg = fs.existsSync(pkgPath);
+    
+    if (!hasFramework && !hasHomebrew && !hasPkg) {
+      console.log("GStreamer not found. Downloading...\n");
       await downloadFile(url, pkgPath);
-    } else {
-      console.log("PKG file already exists. Skipping download.");
+      console.log("\nNow installing GStreamer framework...");
+      console.log("(You may be prompted for your password)\n");
+      
+      try {
+        // Install the .pkg to get the framework
+        execSync(`sudo installer -pkg "${pkgPath}" -target /`, {
+          stdio: "inherit",
+          timeout: 300000,
+        });
+        console.log("\n✓ GStreamer framework installed");
+      } catch (e) {
+        console.log("\n⚠️  Could not auto-install GStreamer framework.");
+        console.log("Please install manually:");
+        console.log(`  1. Double-click: ${pkgPath}`);
+        console.log("  2. Follow the installer");
+        console.log("  3. Re-run: npm run download-gstreamer");
+        return;
+      }
     }
 
-    // Extract PKG (only works on macOS)
-    if (!fs.existsSync(extractDir) || !fs.existsSync(gstLaunchPath)) {
-      if (process.platform !== "darwin") {
-        // Can't extract .pkg on Windows/Linux - provide manual instructions
-        console.log("\n⚠️  Cannot extract macOS .pkg files on Windows/Linux.");
-        console.log(
-          "The .pkg file has been downloaded. You have two options:\n"
-        );
-        console.log("Option 1: Extract on a macOS machine");
-        console.log(`  1. Copy ${pkgPath} to a macOS machine`);
-        console.log(
-          `  2. Run: node scripts/download-gstreamer.js --platform darwin`
-        );
-        console.log(`  3. Copy the extracted gstreamer/macos/ folder back\n`);
-        console.log("Option 2: Manual extraction on macOS");
-        console.log(`  1. On macOS, double-click: ${pkgPath}`);
-        console.log(`  2. Install to a temporary location`);
-        console.log(
-          `  3. Copy installed files from /Library/Frameworks/GStreamer.framework/`
-        );
-        console.log(`  4. Place them in: ${extractDir}\n`);
-        console.log(
-          "The .pkg file will be included in the build, but extraction is required for bundling."
-        );
-        return; // Don't fail, just warn
-      }
-
-      try {
-        await extractPkg(pkgPath, extractDir);
-      } catch (error) {
-        console.log("\n💡 Manual extraction:");
-        console.log(`  1. Double-click: ${pkgPath}`);
-        console.log(`  2. Install to a temporary location`);
-        console.log(`  3. Copy the installed files to: ${extractDir}`);
-        console.log(
-          `  4. Or use: pkgutil --expand "${pkgPath}" "${extractDir}/temp"`
-        );
-        throw error;
-      }
-    } else {
-      console.log("GStreamer already extracted.");
+    // Run the bundling script
+    try {
+      await bundleMacOSGStreamer(extractDir);
+    } catch (error) {
+      console.error("\n❌ Failed to bundle macOS GStreamer:", error.message);
+      console.log("\nManual bundling:");
+      console.log("  1. Ensure GStreamer is installed:");
+      console.log("     - Official: https://gstreamer.freedesktop.org/download/");
+      console.log("     - Or Homebrew: brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav");
+      console.log("  2. Run: bash scripts/bundle-gstreamer-macos.sh");
+      throw error;
     }
 
     console.log("\nGStreamer setup complete!");

@@ -106,7 +106,7 @@ function formatBytes(bytes: number): string {
 interface CliConfig {
   input: string;
   output: string;
-  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc' | 'auto';
+  encoder: 'x265' | 'nvh265' | 'qsvh265' | 'vtenc' | 'vaapih265' | 'msdkh265' | 'auto';
   chunkDuration: string;
   format: 'mp4' | 'mkv' | 'mov';
   compressionRatio?: string; // Compression ratio: 1, 2, 3, 4, 5, 10, 20
@@ -130,7 +130,7 @@ program
   .option('-o, --output <dir>', 'Output directory for processed files')
   .option('-c, --config <file>', 'Path to YAML config file')
   .option('-w, --watch', 'Continuous monitoring mode (watch for new files)', false)
-  .option('--encoder <type>', 'Encoder: auto, x265, nvh265, qsvh265, vtenc (auto detects best)', 'auto')
+  .option('--encoder <type>', 'Encoder: auto, x265, nvh265, qsvh265, msdkh265, vaapih265, vtenc (auto detects best)', 'auto')
   .option('--chunk-duration <minutes>', 'Chunk duration in minutes', '60')
   .option('--format <type>', 'Output format: mp4, mkv, mov', 'mkv')
   .option('--compression-ratio <ratio>', 'Target compression ratio: 1, 2, 3, 4, 5, 10, 20 (2x = half size, recommended)', '2')

@@ -85,9 +85,26 @@ The application automatically:
 - Architecture: x64 and ia32 (x86)
 
 ### macOS
-- ⚠️ Manual setup required
-- Download GStreamer from https://gstreamer.freedesktop.org/download/
-- Place in `gstreamer/` directory
+- ✅ Supported via bundling script
+- The bundling script handles:
+  - Extracting from the official GStreamer framework or using Homebrew installation
+  - Copying all required dylibs to the bundle
+  - Rewriting library paths with `install_name_tool` to use `@loader_path` relative paths
+- Run: `npm run download-gstreamer` on macOS
+- Or manually: `bash scripts/bundle-gstreamer-macos.sh`
+
+#### macOS Prerequisites
+Install GStreamer using one of these methods:
+
+**Option 1: Official Framework (Recommended)**
+1. Download from https://gstreamer.freedesktop.org/download/
+2. Install the .pkg file
+3. Run the bundling script
+
+**Option 2: Homebrew**
+```bash
+brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+```
 
 ### Linux
 - ✅ Supported via **system GStreamer** (recommended)
@@ -127,13 +144,41 @@ gstreamer/
   x64/              # 64-bit Windows binaries
     bin/
       gst-launch-1.0.exe
-      (other executables)
+      gst-inspect-1.0.exe
+      gst-discoverer-1.0.exe
     lib/
       gstreamer-1.0/
         (plugin .dll files)
       (library .dll files)
+    libexec/
+      gstreamer-1.0/
+        gst-plugin-scanner.exe
   x86/              # 32-bit Windows binaries (if needed)
     (same structure)
+  macos/            # macOS universal binaries
+    bin/
+      gst-launch-1.0
+      gst-inspect-1.0
+      gst-discoverer-1.0
+    lib/
+      gstreamer-1.0/
+        (plugin .dylib files)
+      (library .dylib files - with rewritten paths)
+    libexec/
+      gstreamer-1.0/
+        gst-plugin-scanner
+  linux/            # Linux x64 binaries (built via Docker)
+    bin/
+      gst-launch-1.0
+      gst-inspect-1.0
+      gst-discoverer-1.0
+    lib/
+      gstreamer-1.0/
+        (plugin .so files)
+      (library .so files)
+    libexec/
+      gstreamer-1.0/
+        gst-plugin-scanner
 ```
 
 ## Troubleshooting
@@ -147,6 +192,24 @@ gstreamer/
 - Ensure `GST_PLUGIN_PATH` is set correctly
 - Check that plugin DLLs are in `gstreamer/{arch}/lib/gstreamer-1.0/`
 - Verify all required plugins are present
+
+### macOS: "Library not loaded" / dyld errors
+If you see errors like:
+```
+dyld: Library not loaded: /opt/homebrew/opt/glib/lib/libglib-2.0.0.dylib
+```
+
+This means the bundled GStreamer has hardcoded library paths. Fix by:
+1. Re-running the bundling script: `bash scripts/bundle-gstreamer-macos.sh`
+2. Ensure GStreamer is installed (framework or Homebrew)
+3. The script will copy all dylibs and rewrite paths with `install_name_tool`
+
+### macOS: VideoToolbox encoder not detected
+1. The `vtenc_h265` element requires:
+   - macOS 10.13+ (High Sierra) for HEVC encoding
+   - Apple Silicon or Intel Mac with hardware HEVC support
+2. Verify with system GStreamer: `gst-inspect-1.0 vtenc_h265`
+3. If system GStreamer works but bundled doesn't, re-run the bundling script
 
 ### Build size
 - GStreamer adds ~100-200MB to the application size

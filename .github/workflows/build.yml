@@ -126,37 +126,32 @@ jobs:
           }
         continue-on-error: false
 
-      - name: Download GStreamer for macOS
+      - name: Bundle GStreamer for macOS
         if: matrix.platform == 'mac'
         run: |
           echo "Installing GStreamer via Homebrew..."
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
-          mkdir -p gstreamer/macos
-
-          GSTREAMER_PREFIX=$(brew --prefix gstreamer)
-          echo "GStreamer installed at: $GSTREAMER_PREFIX"
-
-          if [ -d "$GSTREAMER_PREFIX" ]; then
-            cp -R $GSTREAMER_PREFIX/lib gstreamer/macos/ || true
-            cp -R $GSTREAMER_PREFIX/libexec gstreamer/macos/ || true
-            
-            GST_PLUGIN_PATH=$(brew --prefix)/lib/gstreamer-1.0
-            if [ -d "$GST_PLUGIN_PATH" ]; then
-              mkdir -p gstreamer/macos/lib/gstreamer-1.0
-              cp -R $GST_PLUGIN_PATH/* gstreamer/macos/lib/gstreamer-1.0/ || true
-            fi
-          fi
-
-          mkdir -p gstreamer/macos/bin
-          for tool in gst-launch-1.0 gst-inspect-1.0 gst-typefind-1.0 gst-discoverer-1.0; do
-            if command -v $tool &> /dev/null; then
-              cp $(which $tool) gstreamer/macos/bin/ || true
-            fi
-          done
-
+          echo ""
+          echo "Running macOS GStreamer bundling script..."
+          echo "This will copy all dylibs and rewrite paths with install_name_tool"
+          echo ""
+          
+          # Run the bundling script which handles:
+          # 1. Copying binaries, plugins, and all dylib dependencies
+          # 2. Rewriting library paths to use @loader_path
+          # 3. Verifying the bundle works
+          bash scripts/bundle-gstreamer-macos.sh
+          
+          echo ""
+          echo "=== Bundle contents ==="
           ls -la gstreamer/macos/
-          echo "GStreamer setup complete for macOS"
+          ls -la gstreamer/macos/bin/
+          echo ""
+          echo "=== Verifying dylib paths are rewritten ==="
+          otool -L gstreamer/macos/bin/gst-inspect-1.0 | head -20
+          echo ""
+          echo "GStreamer bundling complete for macOS"
         continue-on-error: false
 
       - name: Install GStreamer for Linux

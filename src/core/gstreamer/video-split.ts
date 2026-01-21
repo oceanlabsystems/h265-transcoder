@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { BatchProcessConfig, ProgressCallback } from "../types/types";
 import * as path from "path";
 import * as fs from "fs";
@@ -106,7 +106,24 @@ export function getVideoDurationWithContext(
     );
 
     // Check if gst-discoverer exists
-    const discovererExists = fs.existsSync(discovererPath);
+    // If it's just the executable name (system GStreamer), check if it's in PATH
+    // If it's a full path (bundled GStreamer), check if the file exists
+    const isSystemPath = !discovererPath.includes(path.sep);
+    let discovererExists = false;
+    
+    if (isSystemPath) {
+      // For system GStreamer, try to find it in PATH using 'which' (Linux/Mac) or 'where' (Windows)
+      try {
+        const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+        execSync(`${whichCmd} ${discovererPath}`, { stdio: 'ignore' });
+        discovererExists = true;
+      } catch {
+        discovererExists = false;
+      }
+    } else {
+      discovererExists = fs.existsSync(discovererPath);
+    }
+    
     if (!discovererExists) {
       debugLogger.warn(
         `[Duration] gst-discoverer-1.0 not found at: ${discovererPath}`
@@ -492,6 +509,12 @@ export function processVideoFileWithContext(
     } else if (config.encoder === "qsvh265") {
       encoder = "qsvh265enc"; // Intel Quick Sync encoder
       useHardwareFormat = true;
+    } else if (config.encoder === "vaapih265") {
+      encoder = "vaapih265enc"; // VA-API hardware encoder (Linux Intel/AMD)
+      useHardwareFormat = true;
+    } else if (config.encoder === "msdkh265") {
+      encoder = "msdkh265enc"; // Intel Media SDK hardware encoder (Linux)
+      useHardwareFormat = true;
     } else if (config.encoder === "vtenc") {
       encoder = "vtenc_h265"; // Apple VideoToolbox encoder (macOS)
       useHardwareFormat = true;
@@ -633,6 +656,86 @@ export function processVideoFileWithContext(
           "rate-control=cbr",                 // Constant bitrate mode for predictable sizes
           `bitrate=${targetBitrateKbps}`,
           `max-bitrate=${targetBitrateKbps}`, // Cap at target to prevent overshoots
+        ];
+      }
+      
+      debugLogger.logEncoderConfig(
+        encoder,
+        compressionRatio,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
+    } else if (encoder === "vaapih265enc") {
+      // VA-API H.265 encoder configuration (Intel/AMD on Linux)
+      // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/vaapi/vaapih265enc.html
+      // rate-control options: cqp, cbr, vbr, vbr_constrained
+      
+      const compressionRatio = config.compressionRatio!;
+      
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use CQP (Constant QP)
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[VA-API] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → QP: ${qualityValues.nvencQp}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=cqp",                  // Constant QP mode for quality-based encoding
+          `init-qp=${qualityValues.nvencQp}`,  // Initial quantization parameter (using same values as NVENC)
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        debugLogger.info(
+          `[VA-API] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=cbr",                  // Constant bitrate mode for predictable sizes
+          `bitrate=${targetBitrateKbps}`,
+        ];
+      }
+      
+      debugLogger.logEncoderConfig(
+        encoder,
+        compressionRatio,
+        targetBitrateKbps,
+        inputBitrateKbps,
+        encoderArgs
+      );
+    } else if (encoder === "msdkh265enc") {
+      // Intel Media SDK H.265 encoder configuration (Linux)
+      // More stable than VA-API on newer Intel hardware (Meteor Lake, etc.)
+      // rate-control options: cbr, vbr, cqp, avbr, icq, la_icq, qvbr
+      
+      const compressionRatio = config.compressionRatio!;
+      
+      if (durationIsEstimated) {
+        // QUALITY MODE: Duration is estimated/unreliable, use ICQ (Intelligent CQP)
+        const qualityValues = getQualityForCompressionRatio(compressionRatio);
+        
+        debugLogger.info(
+          `[MSDK] Duration estimated - using QUALITY mode. Compression: ${compressionRatio}x → ICQ Quality: ${qualityValues.qsvIcq}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=icq",                   // Intelligent Constant Quality mode
+          `qpi=${qualityValues.qsvIcq}`,        // ICQ quality value (same scale as QSV)
+        ];
+      } else {
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        debugLogger.info(
+          `[MSDK] Duration known - using BITRATE mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
+        );
+        
+        encoderArgs = [
+          encoder,
+          "rate-control=cbr",                   // Constant bitrate mode for predictable sizes
+          `bitrate=${targetBitrateKbps}`,
         ];
       }
       

@@ -35,6 +35,18 @@ FRAMEWORK_PATH="/Library/Frameworks/GStreamer.framework/Versions/1.0"
 HOMEBREW_INTEL="/usr/local/opt/gstreamer"
 HOMEBREW_ARM="/opt/homebrew/opt/gstreamer"
 
+# Temp files for cleanup (bash 3.x compatible - no arrays in trap)
+CLEANUP_TMP_DIR=""
+CLEANUP_PROCESSED_FILE=""
+CLEANUP_LIBS_FILE=""
+
+cleanup() {
+    [[ -n "$CLEANUP_TMP_DIR" ]] && rm -rf "$CLEANUP_TMP_DIR" 2>/dev/null || true
+    [[ -n "$CLEANUP_PROCESSED_FILE" ]] && rm -f "$CLEANUP_PROCESSED_FILE" 2>/dev/null || true
+    [[ -n "$CLEANUP_LIBS_FILE" ]] && rm -f "$CLEANUP_LIBS_FILE" "${CLEANUP_LIBS_FILE}.tmp" 2>/dev/null || true
+}
+trap cleanup EXIT
+
 echo "========================================"
 echo "Bundling GStreamer for macOS"
 echo "Output: $OUT_ROOT"
@@ -62,8 +74,8 @@ elif [[ -d "$HOMEBREW_INTEL/lib" ]]; then
 elif [[ -f "$PKG_PATH" ]]; then
     echo "Found GStreamer .pkg, will extract..."
     # Extract pkg to temp location
-    TMP_DIR="$(mktemp -d)"
-    trap 'rm -rf "$TMP_DIR"' EXIT
+    CLEANUP_TMP_DIR="$(mktemp -d)"
+    TMP_DIR="$CLEANUP_TMP_DIR"
     
     echo "Extracting .pkg to temporary location..."
     pkgutil --expand "$PKG_PATH" "$TMP_DIR/expanded"
@@ -158,15 +170,22 @@ get_deps() {
     otool -L "$1" 2>/dev/null | awk 'NR>1 {print $1}' | grep -v "^/System" | grep -v "^/usr/lib" || true
 }
 
-# Function to copy a dylib and return its basename
+# Function to copy a dylib (returns 0 if copied, 1 if skipped/failed)
 copy_lib() {
     local lib_path="$1"
     local lib_name
     
     # Resolve symlinks to get the real file
-    if [[ -L "$lib_path" ]]; then
-        lib_path="$(readlink -f "$lib_path" 2>/dev/null || realpath "$lib_path" 2>/dev/null || echo "$lib_path")"
-    fi
+    # Note: macOS doesn't have readlink -f, use a loop instead
+    while [[ -L "$lib_path" ]]; do
+        local link_target
+        link_target="$(readlink "$lib_path")"
+        if [[ "$link_target" == /* ]]; then
+            lib_path="$link_target"
+        else
+            lib_path="$(dirname "$lib_path")/$link_target"
+        fi
+    done
     
     if [[ ! -f "$lib_path" ]]; then
         return 1
@@ -184,73 +203,91 @@ copy_lib() {
     return 0
 }
 
-# Collect all dependencies recursively
-declare -A PROCESSED_LIBS
-LIBS_TO_PROCESS=()
+# Use a file to track processed libraries (bash 3.x compatible)
+CLEANUP_PROCESSED_FILE=$(mktemp)
+PROCESSED_FILE="$CLEANUP_PROCESSED_FILE"
+
+is_processed() {
+    grep -q "^$1$" "$PROCESSED_FILE" 2>/dev/null
+}
+
+mark_processed() {
+    echo "$1" >> "$PROCESSED_FILE"
+}
+
+# Collect initial dependencies from binaries, plugins, and libexec
+CLEANUP_LIBS_FILE=$(mktemp)
+LIBS_TO_PROCESS="$CLEANUP_LIBS_FILE"
 
 # Start with binaries
 for bin in "$OUT_ROOT/bin/"*; do
     [[ -f "$bin" ]] || continue
-    for dep in $(get_deps "$bin"); do
-        LIBS_TO_PROCESS+=("$dep")
-    done
+    get_deps "$bin" >> "$LIBS_TO_PROCESS"
 done
 
 # Add plugins
 for plugin in "$OUT_ROOT/lib/gstreamer-1.0/"*.dylib; do
     [[ -f "$plugin" ]] || continue
-    for dep in $(get_deps "$plugin"); do
-        LIBS_TO_PROCESS+=("$dep")
-    done
+    get_deps "$plugin" >> "$LIBS_TO_PROCESS"
 done
 
 # Add libexec binaries
 for libexec_bin in "$OUT_ROOT/libexec/gstreamer-1.0/"*; do
     [[ -f "$libexec_bin" ]] || continue
-    for dep in $(get_deps "$libexec_bin"); do
-        LIBS_TO_PROCESS+=("$dep")
-    done
+    get_deps "$libexec_bin" >> "$LIBS_TO_PROCESS"
 done
 
 # Process all dependencies (up to 10 iterations for transitive deps)
-for iteration in {1..10}; do
-    NEW_LIBS=()
+for iteration in 1 2 3 4 5 6 7 8 9 10; do
+    NEW_LIBS=$(mktemp)
+    has_new=0
     
-    for lib_path in "${LIBS_TO_PROCESS[@]}"; do
+    # Sort and unique the list
+    sort -u "$LIBS_TO_PROCESS" > "${LIBS_TO_PROCESS}.tmp"
+    mv "${LIBS_TO_PROCESS}.tmp" "$LIBS_TO_PROCESS"
+    
+    while IFS= read -r lib_path || [[ -n "$lib_path" ]]; do
+        [[ -z "$lib_path" ]] && continue
+        
         # Skip if already processed
-        [[ -n "${PROCESSED_LIBS[$lib_path]:-}" ]] && continue
-        PROCESSED_LIBS["$lib_path"]=1
+        is_processed "$lib_path" && continue
+        mark_processed "$lib_path"
         
         # Try to find the library
         actual_path=""
+        lib_basename="$(basename "$lib_path")"
         
         # Check various locations
         if [[ -f "$lib_path" ]]; then
             actual_path="$lib_path"
-        elif [[ -f "$GST_SOURCE/lib/$(basename "$lib_path")" ]]; then
-            actual_path="$GST_SOURCE/lib/$(basename "$lib_path")"
-        elif [[ -f "/opt/homebrew/lib/$(basename "$lib_path")" ]]; then
-            actual_path="/opt/homebrew/lib/$(basename "$lib_path")"
-        elif [[ -f "/usr/local/lib/$(basename "$lib_path")" ]]; then
-            actual_path="/usr/local/lib/$(basename "$lib_path")"
+        elif [[ -f "$GST_SOURCE/lib/$lib_basename" ]]; then
+            actual_path="$GST_SOURCE/lib/$lib_basename"
+        elif [[ -f "/opt/homebrew/lib/$lib_basename" ]]; then
+            actual_path="/opt/homebrew/lib/$lib_basename"
+        elif [[ -f "/usr/local/lib/$lib_basename" ]]; then
+            actual_path="/usr/local/lib/$lib_basename"
         fi
         
         if [[ -n "$actual_path" ]] && [[ -f "$actual_path" ]]; then
             if copy_lib "$actual_path"; then
                 # Get transitive dependencies
                 for dep in $(get_deps "$actual_path"); do
-                    if [[ -z "${PROCESSED_LIBS[$dep]:-}" ]]; then
-                        NEW_LIBS+=("$dep")
+                    if ! is_processed "$dep"; then
+                        echo "$dep" >> "$NEW_LIBS"
+                        has_new=1
                     fi
                 done
             fi
         fi
-    done
+    done < "$LIBS_TO_PROCESS"
     
     # If no new libraries found, we're done
-    [[ ${#NEW_LIBS[@]} -eq 0 ]] && break
+    if [[ $has_new -eq 0 ]]; then
+        rm -f "$NEW_LIBS"
+        break
+    fi
     
-    LIBS_TO_PROCESS=("${NEW_LIBS[@]}")
+    mv "$NEW_LIBS" "$LIBS_TO_PROCESS"
 done
 
 LIB_COUNT=$(ls -1 "$OUT_ROOT/lib/"*.dylib 2>/dev/null | wc -l | tr -d ' ')

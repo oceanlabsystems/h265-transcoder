@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.5.1](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.5.0...v1.5.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* linux deps and apple vt_enc rate control syntax ([4b0b013](https://github.com/oceanlabsystems/h265-transcoder/commit/4b0b01371f0b486c50ed5831aabb804c5c6fcdd4))
+
 ## [1.5.0](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.4.13...v1.5.0) (2026-01-20)
 
 

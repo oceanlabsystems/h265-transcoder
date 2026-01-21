@@ -25,13 +25,21 @@ A professional video transcoding solution with both a desktop GUI application an
 
 Download the latest installer from [Releases](https://github.com/oceanlabsystems/h265-transcoder/releases):
 
-| Platform | Download                          |
-| -------- | --------------------------------- |
-| Windows  | `h265-transcoder-X.X.X-setup.exe` |
-| macOS    | `h265-transcoder-X.X.X.dmg`       |
-| Linux    | `h265-transcoder-X.X.X.AppImage`  |
+| Platform | Download                          | Notes |
+| -------- | --------------------------------- | ----- |
+| Windows  | `h265-transcoder-X.X.X-setup.exe` | GStreamer bundled |
+| macOS    | `h265-transcoder-X.X.X.dmg`       | GStreamer bundled |
+| Linux    | `h265-transcoder-X.X.X.deb`       | **Recommended** — GStreamer installed automatically via apt |
+| Linux    | `h265-transcoder-X.X.X.AppImage`  | Requires manual GStreamer install (see below) |
 
 The installer includes both the GUI application and CLI service tools.
+
+> **Linux .deb users:** GStreamer is automatically installed when you install the `.deb` package.
+>
+> **Linux AppImage users:** Install GStreamer first:
+> ```bash
+> sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+> ```
 
 ### Docker (Headless Linux Servers)
 
@@ -235,6 +243,8 @@ npm install
 npm run download-gstreamer
 ```
 
+**Linux note:** `npm run download-gstreamer` does not download binaries on Linux. It checks for a system GStreamer install and prints distro-specific install commands if missing.
+
 ### Development Commands
 
 ```bash
@@ -284,12 +294,22 @@ h265-transcoder/
 ### GStreamer Not Found
 
 ```bash
-# Linux: Install system GStreamer
-sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-{base,good,bad,ugly} gstreamer1.0-libav
+# Linux: Install system GStreamer (recommended)
+sudo apt install gstreamer1.0-tools \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav
+
+# Or run the helper (Linux only). Set AUTO_INSTALL_GSTREAMER=1 to auto-install via apt.
+npm run check:gstreamer:linux
 
 # Windows: Run download script
 npm run download-gstreamer
 ```
+
+**Note (Linux installers / first-run):**
+- You can call `npm run check:gstreamer:linux` during install or first launch to validate deps.
+- To auto-install on Debian/Ubuntu when missing, run with `AUTO_INSTALL_GSTREAMER=1`.
 
 ### Encoder Not Available
 

@@ -22,6 +22,73 @@ const GSTREAMER_URLS = {
 
 const OUTPUT_DIR = path.join(__dirname, "..", "gstreamer");
 
+function commandExists(cmd) {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "ignore", shell: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function checkLinuxGStreamer() {
+  console.log("Linux detected: using system GStreamer (no bundling download step).");
+
+  const required = ["gst-launch-1.0", "gst-inspect-1.0", "gst-discoverer-1.0"];
+  const missing = required.filter((c) => !commandExists(c));
+
+  if (missing.length === 0) {
+    try {
+      const version = execSync("gst-launch-1.0 --version", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        shell: true,
+      })
+        .trim()
+        .split("\n")[0];
+      console.log(`✓ GStreamer OK: ${version}`);
+    } catch {
+      console.log("✓ GStreamer tools found on PATH.");
+    }
+    console.log(
+      "Nothing to download for Linux. You can build/run using your system installation."
+    );
+    return true;
+  }
+
+  console.log(`\n❌ Missing GStreamer tools on PATH: ${missing.join(", ")}`);
+  console.log("\nInstall GStreamer for your distro, then re-run this command.\n");
+
+  console.log("Debian/Ubuntu:");
+  console.log(
+    "  sudo apt update && sudo apt install -y \\\n" +
+      "    gstreamer1.0-tools \\\n" +
+      "    gstreamer1.0-plugins-base gstreamer1.0-plugins-good \\\n" +
+      "    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \\\n" +
+      "    gstreamer1.0-libav"
+  );
+
+  console.log("\nFedora:");
+  console.log(
+    "  sudo dnf install -y \\\n" +
+      "    gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good \\\n" +
+      "    gstreamer1-plugins-bad-free gstreamer1-plugins-bad-freeworld \\\n" +
+      "    gstreamer1-plugins-ugly gstreamer1-libav"
+  );
+
+  console.log("\nArch:");
+  console.log(
+    "  sudo pacman -S --needed \\\n" +
+      "    gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad \\\n" +
+      "    gst-plugins-ugly gst-libav"
+  );
+
+  console.log(
+    "\nIf you prefer bundling on Linux, place a local GStreamer distribution in `gstreamer/linux/` with `bin/` and `lib/`."
+  );
+  return false;
+}
+
 function downloadFile(url, outputPath) {
   return new Promise((resolve, reject) => {
     console.log(`Downloading ${url}...`);
@@ -926,10 +993,13 @@ async function setupGStreamer(targetPlatform) {
   }
 
   if (platform !== "win32") {
+    if (platform === "linux") {
+      // Linux: rely on system GStreamer (preferred) or optionally a local bundle in gstreamer/linux
+      checkLinuxGStreamer();
+      return;
+    }
+
     console.log("This script currently only supports Windows and macOS.");
-    console.log(
-      "For Linux, please install GStreamer manually and place it in the gstreamer/ directory."
-    );
     return;
   }
 

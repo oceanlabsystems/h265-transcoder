@@ -27,7 +27,8 @@ For each platform:
    - Uploads to artifacts
 
 3. **Linux (Ubuntu)**:
-   - Installs GStreamer via system packages
+   - By default installs GStreamer via system packages
+   - Optional: build and bundle GStreamer (Ubuntu 20.04 baseline) by setting `BUNDLE_GSTREAMER_LINUX=1` (runs `scripts/build-gstreamer-linux-bundle.sh`)
    - Builds AppImage and DEB packages
    - Uploads to artifacts
 
@@ -110,6 +111,14 @@ git push origin v1.0.0
 - **Windows**: Bundled GStreamer from MSI extraction
 - **macOS**: Bundled GStreamer framework
 - **Linux**: Uses system-installed GStreamer (not bundled)
+  - **.deb packages** declare GStreamer as a dependency — `apt` installs it automatically when users install the `.deb`
+  - **AppImage** users should install GStreamer manually or run `npm run check:gstreamer:linux`
+  - Optional bundling: run `BUNDLE_GSTREAMER_LINUX=1 bash scripts/build-gstreamer-linux-bundle.sh` to create a Ubuntu 20.04-based bundle in `gstreamer/linux/`
+
+For Linux CI or first-run validation, you can use:
+
+- `npm run check:gstreamer:linux` — verifies required tools are present
+- `AUTO_INSTALL_GSTREAMER=1 npm run check:gstreamer:linux` — auto-installs via `apt-get` when available (non-interactive)
 
 ## Troubleshooting
 

@@ -4,6 +4,71 @@ import * as path from "path";
 import { RuntimeContext, getGStreamerPathWithContext } from "./gstreamer-path";
 import { debugLogger } from "./debug-logger";
 
+function shouldFallbackToSystemGStreamer(stderr: string): boolean {
+  const s = (stderr || "").toLowerCase();
+  return (
+    // glibc mismatch (common when bundling on newer distros)
+    s.includes("glibc_") ||
+    (s.includes("libc.so.6") && s.includes("version") && s.includes("not found")) ||
+    // loader errors
+    s.includes("error while loading shared libraries") ||
+    s.includes("no such file or directory") // often printed by loader for missing interpreter/lib
+  );
+}
+
+async function spawnInspectAndCheck(
+  inspectPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number
+): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const proc = spawn(inspectPath, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let done = false;
+
+    const finish = (result: { code: number | null; stdout: string; stderr: string; timedOut: boolean }) => {
+      if (done) return;
+      done = true;
+      resolve(result);
+    };
+
+    proc.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("exit", (code) => {
+      clearTimeout(timeout);
+      finish({ code, stdout, stderr, timedOut });
+    });
+
+    proc.on("error", (err) => {
+      clearTimeout(timeout);
+      finish({ code: 1, stdout: "", stderr: err.message, timedOut: false });
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      try {
+        proc.kill();
+      } catch {
+        // ignore
+      }
+      finish({ code: 1, stdout, stderr, timedOut });
+    }, timeoutMs);
+  });
+}
+
 /**
  * Available encoder types
  */
@@ -134,44 +199,46 @@ async function ensureRegistryInitialized(
     }
   }
 
-  return new Promise((resolve) => {
-    // Run gst-inspect with --version to trigger registry initialization
-    // This is faster than listing all elements but still builds the registry
-    const gstInspect = spawn(inspectPath, ["--version"], {
-      env: processEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+  // Run gst-inspect with --version to trigger registry initialization.
+  // If a bundled Linux GStreamer can't execute (GLIBC mismatch), fall back to system GStreamer.
+  const first = await spawnInspectAndCheck(
+    inspectPath,
+    ["--version"],
+    processEnv,
+    60000
+  );
 
-    let timedOut = false;
+  debugLogger.logInit(
+    `[Encoder Detection] Registry initialization completed (exit code: ${first.code})`,
+    context
+  );
 
-    gstInspect.on("exit", (code) => {
-      if (!timedOut) {
-        debugLogger.logInit(
-          `[Encoder Detection] Registry initialization completed (exit code: ${code})`,
-          context
-        );
-        resolve(code === 0);
-      }
-    });
+  if (first.code === 0) return true;
 
-    gstInspect.on("error", (err) => {
-      debugLogger.logInit(
-        `[Encoder Detection] Registry initialization error: ${err.message}`
-      );
-      resolve(false);
-    });
+  if (
+    process.platform === "linux" &&
+    binPath &&
+    inspectPath !== inspectExecutable &&
+    shouldFallbackToSystemGStreamer(first.stderr)
+  ) {
+    debugLogger.logInit(
+      "[Encoder Detection] Bundled GStreamer appears incompatible; retrying registry init with system GStreamer...",
+      context
+    );
+    const second = await spawnInspectAndCheck(
+      inspectExecutable,
+      ["--version"],
+      { ...process.env },
+      60000
+    );
+    debugLogger.logInit(
+      `[Encoder Detection] System registry init completed (exit code: ${second.code})`,
+      context
+    );
+    return second.code === 0;
+  }
 
-    // Allow 60 seconds for first-time registry initialization
-    setTimeout(() => {
-      timedOut = true;
-      debugLogger.logInit(
-        `[Encoder Detection] Registry initialization timeout (60s) - killing process`
-      );
-      gstInspect.kill();
-      resolve(false);
-    }, 60000);
-  });
+  return false;
 }
 
 /**
@@ -292,57 +359,67 @@ async function checkGStreamerElement(
       );
     }
 
-    const gstInspect = spawn(inspectPath, [elementName], {
-      env: processEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-      // Windows-specific: hide the console window to prevent GUI issues
-      windowsHide: true,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-
-    gstInspect.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    gstInspect.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    gstInspect.on("exit", (code) => {
-      // Element exists if exit code is 0 and we got output
-      const exists =
-        code === 0 && stdout.length > 0 && !stderr.includes("No such element");
-      debugLogger.logInit(
-        `[Encoder Detection] gst-inspect ${elementName}: exitCode=${code}, stdout=${stdout.length}bytes, exists=${exists}${timedOut ? " (TIMED OUT)" : ""}`
+    (async () => {
+      const first = await spawnInspectAndCheck(
+        inspectPath,
+        [elementName],
+        processEnv,
+        timeoutMs
       );
-      if (stderr) {
+
+      const existsFirst =
+        first.code === 0 &&
+        first.stdout.length > 0 &&
+        !first.stderr.includes("No such element");
+
+      debugLogger.logInit(
+        `[Encoder Detection] gst-inspect ${elementName}: exitCode=${first.code}, stdout=${first.stdout.length}bytes, exists=${existsFirst}${first.timedOut ? " (TIMED OUT)" : ""}`
+      );
+      if (first.stderr) {
         debugLogger.logInit(
-          `[Encoder Detection] gst-inspect ${elementName} stderr: ${stderr.substring(0, 500)}`,
+          `[Encoder Detection] gst-inspect ${elementName} stderr: ${first.stderr.substring(0, 500)}`,
           context
         );
       }
-      resolve(exists);
-    });
 
-    gstInspect.on("error", (err) => {
-      debugLogger.logInit(
-        `[Encoder Detection] gst-inspect spawn error for ${elementName}: ${err.message}`
-      );
-      resolve(false);
-    });
+      if (existsFirst) return resolve(true);
 
-    // Timeout (default 10 seconds, can be overridden)
-    setTimeout(() => {
-      timedOut = true;
-      debugLogger.logInit(
-        `[Encoder Detection] gst-inspect ${elementName}: TIMEOUT (${timeoutMs}ms) - killing process`
-      );
-      gstInspect.kill();
-      resolve(false);
-    }, timeoutMs);
+      // Linux: if bundled GStreamer exists but can't execute (glibc/loader), fall back to system tools.
+      if (
+        process.platform === "linux" &&
+        binPath &&
+        inspectPath !== inspectExecutable &&
+        shouldFallbackToSystemGStreamer(first.stderr)
+      ) {
+        debugLogger.logInit(
+          `[Encoder Detection] Bundled GStreamer appears incompatible; retrying ${elementName} check with system GStreamer...`,
+          context
+        );
+        const second = await spawnInspectAndCheck(
+          inspectExecutable,
+          [elementName],
+          { ...process.env },
+          timeoutMs
+        );
+        const existsSecond =
+          second.code === 0 &&
+          second.stdout.length > 0 &&
+          !second.stderr.includes("No such element");
+
+        debugLogger.logInit(
+          `[Encoder Detection] system gst-inspect ${elementName}: exitCode=${second.code}, stdout=${second.stdout.length}bytes, exists=${existsSecond}${second.timedOut ? " (TIMED OUT)" : ""}`
+        );
+        if (second.stderr) {
+          debugLogger.logInit(
+            `[Encoder Detection] system gst-inspect ${elementName} stderr: ${second.stderr.substring(0, 500)}`,
+            context
+          );
+        }
+        return resolve(existsSecond);
+      }
+
+      return resolve(false);
+    })().catch(() => resolve(false));
   });
 }
 

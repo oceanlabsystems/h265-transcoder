@@ -90,9 +90,35 @@ The application automatically:
 - Place in `gstreamer/` directory
 
 ### Linux
-- ⚠️ Manual setup required
-- Install GStreamer development packages or download binaries
-- Place in `gstreamer/` directory
+- ✅ Supported via **system GStreamer** (recommended)
+- Install GStreamer packages (see below) and ensure `gst-launch-1.0`, `gst-inspect-1.0`, and `gst-discoverer-1.0` are available on `PATH`
+- Optional bundling (advanced): place a local distribution in `gstreamer/linux/` with `bin/` and `lib/` (the runtime will prefer bundled binaries if present)
+
+#### Linux install commands
+
+Debian/Ubuntu:
+```bash
+sudo apt update && sudo apt install -y \
+  gstreamer1.0-tools \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav
+```
+
+Fedora:
+```bash
+sudo dnf install -y \
+  gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good \
+  gstreamer1-plugins-bad-free gstreamer1-plugins-bad-freeworld \
+  gstreamer1-plugins-ugly gstreamer1-libav
+```
+
+Arch:
+```bash
+sudo pacman -S --needed \
+  gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad \
+  gst-plugins-ugly gst-libav
+```
 
 ## File Structure
 

@@ -515,7 +515,7 @@ export function processVideoFileWithContext(
     let encoderArgs: string[] = [];
     
     if (encoder === "vtenc_h265") {
-      // VideoToolbox encoder configuration
+      // Apple VideoToolbox encoder configuration
       // Per GStreamer docs: https://gstreamer.freedesktop.org/documentation/applemedia/vtenc_h265.html
       
       const compressionRatio = config.compressionRatio!;
@@ -536,7 +536,7 @@ export function processVideoFileWithContext(
         ];
       } else {
         // BITRATE MODE: Duration is known, use CBR for predictable file sizes
-        // rate-control options: constant-bitrate, average-bitrate, variable-bitrate
+        // rate-control options: constant-bitrate, average-bitrate
         const qualityFloor = 0.5;
         
         debugLogger.info(
@@ -546,7 +546,7 @@ export function processVideoFileWithContext(
         encoderArgs = [
           encoder,
           `bitrate=${targetBitrateKbps}`,
-          "rate-control=constant-bitrate",  // Enforce bitrate target for predictable file sizes
+          "rate-control=1",  // Enforce bitrate target for predictable file sizes.. abr=0, cbr=1
           `quality=${qualityFloor}`,         // Visual quality floor
           "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
         ];

@@ -178,10 +178,15 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
       
       // Plugin scanner for Linux
       const linuxScannerCandidates = [
+        // Bundled layout (preferred): gstreamer/linux/libexec/...
         path.join(path.dirname(binPath), 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        // Alternative bundled layout: sometimes scanner lives under lib/
+        path.join(libPath, 'gstreamer-1.0', 'gst-plugin-scanner'),
         path.join(gstRoot, 'libexec', 'gstreamer-1.0', 'gst-plugin-scanner'),
+        // Common system locations (vary by distro)
         '/usr/libexec/gstreamer-1.0/gst-plugin-scanner',
-        '/usr/lib/gstreamer-1.0/gst-plugin-scanner',
+        '/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner',
+        '/usr/lib64/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner',
       ];
       for (const scannerPath of linuxScannerCandidates) {
         if (fs.existsSync(scannerPath)) {

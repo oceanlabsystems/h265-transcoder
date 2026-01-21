@@ -124,6 +124,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck:cli": "tsc --noEmit -p tsconfig.cli.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "check:gstreamer:linux": "node scripts/check-gstreamer-linux.js",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
@@ -136,7 +137,7 @@
     "build:win64": "npm run build && npm run cli:build && electron-builder --win --x64",
     "prebuild:mac": "node scripts/download-gstreamer.js --platform darwin",
     "build:mac": "npm run prebuild:mac && electron-vite build && npm run cli:build && electron-builder --mac",
-    "prebuild:linux": "echo 'GStreamer will be installed via system packages in CI'",
+    "prebuild:linux": "node -e \"process.exit(process.env.BUNDLE_GSTREAMER_LINUX==='1'?0:1)\" && bash scripts/build-gstreamer-linux-bundle.sh || echo 'Linux: using system GStreamer (set BUNDLE_GSTREAMER_LINUX=1 to bundle)'",
     "build:linux": "npm run prebuild:linux && electron-vite build && npm run cli:build && electron-builder --linux",
     "generate-icons": "node scripts/generate-icons.js",
     "release-major": "npx standard-version --release-as major && git push --follow-tags origin main",
@@ -163,8 +164,7 @@
     "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "sonner": "^2.0.3",
-    "yaml": "^2.8.2",
-    "yarn": "^1.22.22"
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@ant-design/icons": "^5.5.1",
@@ -199,6 +199,7 @@
     "to-ico": "^1.1.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
-    "vite": "^5.3.1"
+    "vite": "^5.3.1",
+    "yarn": "^1.22.22"
   }
 }

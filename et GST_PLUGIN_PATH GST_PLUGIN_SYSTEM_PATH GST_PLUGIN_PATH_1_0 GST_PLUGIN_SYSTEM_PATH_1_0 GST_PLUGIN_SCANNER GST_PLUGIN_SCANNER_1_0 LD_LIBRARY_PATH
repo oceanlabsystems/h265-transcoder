@@ -1,0 +1,116 @@
+[33mFactory Details:[0m
+  [94mRank                     [0mprimary (256)[0m
+  [94mLong-name                [0mx265enc[0m
+  [94mKlass                    [0mCodec/Encoder/Video[0m
+  [94mDescription              [0mH265 Encoder[0m
+  [94mAuthor                   [0mThijs Vermeir <thijs.vermeir@barco.com>[0m
+
+[33mPlugin Details[0m:
+  [94mName                     [0m[0mx265[0m
+  [94mDescription              [0m[0mx265-based H265 plugins[0m
+  [94mFilename                 [0m[0m/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstx265.so[0m
+  [94mVersion                  [0m[0m1.20.3[0m
+  [94mLicense                  [0m[0mGPL[0m
+  [94mSource module            [0m[0mgst-plugins-bad[0m
+  [94mSource release date      [0m[0m2022-06-15[0m
+  [94mBinary package           [0m[0mGStreamer Bad Plugins (Ubuntu)[0m
+  [94mOrigin URL               [0m[0mhttps://launchpad.net/distros/ubuntu/+source/gst-plugins-bad1.0[0m
+
+[32mGObject[0m
+ [95m+----[0m[32mGInitiallyUnowned[0m
+       [95m+----[0m[32mGstObject[0m
+             [95m+----[0m[32mGstElement[0m
+                   [95m+----[0m[32mGstVideoEncoder[0m
+                         [95m+----[0m[32mGstX265Enc[0m
+
+[33mImplemented Interfaces[0m:
+  [32mGstPreset[0m
+
+[33mPad Templates[0m:
+  [94mSINK template[0m: [0m'sink'[0m
+    [94mAvailability[0m: [0mAlways[0m
+    [94mCapabilities[0m:
+      [33mvideo/x-raw[0m
+        [36m      framerate[0m: [94m[ 0/1, 2147483647/1 ][0m
+        [36m          width[0m: [94m[ 16, 2147483647 ][0m
+        [36m         height[0m: [94m[ 16, 2147483647 ][0m
+        [36m         format[0m: [94m{ (string)Y444, (string)Y42B, (string)I420, (string)Y444_10LE, (string)I422_10LE, (string)I420_10LE, (string)Y444_12LE, (string)I422_12LE, (string)I420_12LE }[0m
+  
+  [94mSRC template[0m: [0m'src'[0m
+    [94mAvailability[0m: [0mAlways[0m
+    [94mCapabilities[0m:
+      [33mvideo/x-h265[0m
+        [36m      framerate[0m: [94m[ 0/1, 2147483647/1 ][0m
+        [36m          width[0m: [94m[ 16, 2147483647 ][0m
+        [36m         height[0m: [94m[ 16, 2147483647 ][0m
+        [36m  stream-format[0m: [94mbyte-stream[0m
+        [36m      alignment[0m: [94mau[0m
+        [36m        profile[0m: [94m{ (string)main, (string)main-still-picture, (string)main-intra, (string)main-444, (string)main-444-intra, (string)main-444-still-picture, (string)main-10, (string)main-10-intra, (string)main-422-10, (string)main-422-10-intra, (string)main-444-10, (string)main-444-10-intra, (string)main-12, (string)main-12-intra, (string)main-422-12, (string)main-422-12-intra, (string)main-444-12, (string)main-444-12-intra }[0m
+
+[0mElement has no clocking capabilities.[0m
+[0mElement has no URI handling capabilities.[0m
+
+[33mPads:[0m
+  [94mSINK[0m: [0m'sink'[0m
+    [94mPad Template[0m: [0m'sink'[0m
+  [94mSRC[0m: [0m'src'[0m
+    [94mPad Template[0m: [0m'src'[0m
+
+[33mElement Properties[0m:
+  [94mbitrate             [0m: [0mBitrate in kbit/sec[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m, [36mchangeable in NULL, READY, PAUSED or PLAYING state[0m
+                        [32mUnsigned Integer[0m. [33mRange[0m: [36m1 - 102400[0m [33mDefault[0m: [36m2048[0m 
+  [94mkey-int-max         [0m: [0mMaximal distance between two key-frames (0 = x265 default / 250)[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger[0m. [33mRange[0m: [36m0 - 2147483647[0m [33mDefault[0m: [36m0[0m 
+  [94mlog-level           [0m: [0mx265 log level[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mEnum "GstX265LogLevel"[0m [33mDefault[0m: [36m-1, "none"[0m
+                           [33m(-1)[0m: [36mnone            [0m - [0mNo logging[0m
+                           [33m(0)[0m: [36merror           [0m - [0mError[0m
+                           [33m(1)[0m: [36mwarning         [0m - [0mWarning[0m
+                           [33m(2)[0m: [36minfo            [0m - [0mInfo[0m
+                           [33m(3)[0m: [36mdebug           [0m - [0mDebug[0m
+                           [33m(4)[0m: [36mfull            [0m - [0mFull[0m
+  [94mmin-force-key-unit-interval[0m: [0mMinimum interval between force-keyunit requests in nanoseconds[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mUnsigned Integer64[0m. [33mRange[0m: [36m0 - 18446744073709551615[0m [33mDefault[0m: [36m0[0m 
+  [94mname                [0m: [0mThe name of the object[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m, 0x[36m2000[0m
+                        [32mString[0m. [33mDefault[0m: [36m"x265enc0"[0m
+  [94moption-string       [0m: [0mString of x265 options (overridden by element properties) in the format "key1=value1:key2=value2".[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mString[0m. [33mDefault[0m: [36m""[0m
+  [94mparent              [0m: [0mThe parent of the object[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m, 0x[36m2000[0m
+                        [0mObject of type[0m [32m"GstObject"[0m
+  [94mqos                 [0m: [0mHandle Quality-of-Service events from downstream[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mBoolean[0m. [33mDefault[0m: [36mfalse[0m
+  [94mqp                  [0m: [0mQP for P slices in (implied) CQP mode (-1 = disabled)[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mInteger[0m. [33mRange[0m: [36m-1 - 51[0m [33mDefault[0m: [36m-1[0m 
+  [94mspeed-preset        [0m: [0mPreset name for speed/quality tradeoff options[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mEnum "GstX265SpeedPreset"[0m [33mDefault[0m: [36m6, "medium"[0m
+                           [33m(0)[0m: [36mNo preset       [0m - [0mNo preset[0m
+                           [33m(1)[0m: [36multrafast       [0m - [0multrafast[0m
+                           [33m(2)[0m: [36msuperfast       [0m - [0msuperfast[0m
+                           [33m(3)[0m: [36mveryfast        [0m - [0mveryfast[0m
+                           [33m(4)[0m: [36mfaster          [0m - [0mfaster[0m
+                           [33m(5)[0m: [36mfast            [0m - [0mfast[0m
+                           [33m(6)[0m: [36mmedium          [0m - [0mmedium[0m
+                           [33m(7)[0m: [36mslow            [0m - [0mslow[0m
+                           [33m(8)[0m: [36mslower          [0m - [0mslower[0m
+                           [33m(9)[0m: [36mveryslow        [0m - [0mveryslow[0m
+                           [33m(10)[0m: [36mplacebo         [0m - [0mplacebo[0m
+  [94mtune                [0m: [0mPreset name for tuning options[0m
+                        [33mflags[0m: [36mreadable[0m, [36mwritable[0m
+                        [32mEnum "GstX265Tune"[0m [33mDefault[0m: [36m2, "ssim"[0m
+                           [33m(0)[0m: [36mNo tunning      [0m - [0mNo tunning[0m
+                           [33m(1)[0m: [36mpsnr            [0m - [0mpsnr[0m
+                           [33m(2)[0m: [36mssim            [0m - [0mssim[0m
+                           [33m(3)[0m: [36mgrain           [0m - [0mgrain[0m
+                           [33m(4)[0m: [36mzerolatency     [0m - [0mzerolatency[0m
+                           [33m(5)[0m: [36mfastdecode      [0m - [0mfastdecode[0m
+                           [33m(6)[0m: [36manimation       [0m - [0manimation[0m

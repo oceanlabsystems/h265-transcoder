@@ -177,6 +177,9 @@ echo "Copying plugins (selective - excluding unnecessary ones)..."
 EXCLUDE_PATTERNS=(
     "*python*"           # Python plugin (requires framework)
     "*gstpython*"        # Python plugin variants
+    "*ges*"              # GStreamer Editing Services (requires Python framework)
+    "*gstges*"           # GES plugin variants
+    "*nle*"              # Non-linear editing (part of GES, requires Python)
     "*rtsp*"             # RTSP streaming
     "*rtmp*"             # RTMP streaming
     "*rtp*"              # RTP streaming

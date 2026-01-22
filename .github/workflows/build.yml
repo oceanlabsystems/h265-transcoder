@@ -134,15 +134,42 @@ jobs:
           echo ""
           
           # Download official GStreamer framework (universal binary - works on Intel and Apple Silicon)
-          GSTREAMER_VERSION="1.24.10"
-          PKG_URL="https://gstreamer.freedesktop.org/data/pkg/osx/${GSTREAMER_VERSION}/gstreamer-1.0-${GSTREAMER_VERSION}-universal.pkg"
+          GSTREAMER_VERSION="1.26.10"
           PKG_FILE="gstreamer.pkg"
           
-          echo "Downloading GStreamer ${GSTREAMER_VERSION} from freedesktop.org..."
-          curl -L -o "$PKG_FILE" "$PKG_URL"
+          # Try multiple URL patterns (freedesktop.org changed their structure)
+          URLS=(
+            "https://gstreamer.freedesktop.org/data/pkg/osx/1.26.10/gstreamer-1.0-1.26.10-universal.pkg"
+          )
           
-          echo "Installing GStreamer framework..."
-          sudo installer -pkg "$PKG_FILE" -target /
+          DOWNLOAD_SUCCESS=0
+          for PKG_URL in "${URLS[@]}"; do
+            echo "Trying: $PKG_URL"
+            if curl -fL -o "$PKG_FILE" "$PKG_URL" 2>/dev/null; then
+              # Verify it's a real pkg (should be > 100MB)
+              FILE_SIZE=$(stat -f%z "$PKG_FILE" 2>/dev/null || stat -c%s "$PKG_FILE" 2>/dev/null || echo "0")
+              if [ "$FILE_SIZE" -gt 100000000 ]; then
+                echo "  ✓ Downloaded successfully ($(echo "$FILE_SIZE / 1048576" | bc)MB)"
+                DOWNLOAD_SUCCESS=1
+                break
+              else
+                echo "  ✗ File too small (${FILE_SIZE} bytes), trying next URL..."
+                rm -f "$PKG_FILE"
+              fi
+            else
+              echo "  ✗ Download failed, trying next URL..."
+            fi
+          done
+          
+          if [ "$DOWNLOAD_SUCCESS" -eq 0 ]; then
+            echo "ERROR: Failed to download GStreamer from any URL"
+            echo "Falling back to Homebrew installation..."
+            brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+          else
+            echo "Installing GStreamer framework..."
+            sudo installer -pkg "$PKG_FILE" -target /
+            rm -f "$PKG_FILE"
+          fi
           
           echo "Verifying installation..."
           ls -la /Library/Frameworks/GStreamer.framework/Versions/1.0/bin/ | head -10

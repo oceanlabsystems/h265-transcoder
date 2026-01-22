@@ -426,10 +426,18 @@ async function checkGStreamerElement(
         `[Encoder Detection] gst-inspect ${elementName}: exitCode=${first.code}, stdout=${first.stdout.length}bytes, exists=${existsFirst}${first.timedOut ? " (TIMED OUT)" : ""}`
       );
       if (first.stderr) {
+        const stderrPreview = first.stderr.substring(0, 500);
         debugLogger.logInit(
-          `[Encoder Detection] gst-inspect ${elementName} stderr: ${first.stderr.substring(0, 500)}`,
+          `[Encoder Detection] gst-inspect ${elementName} stderr: ${stderrPreview}`,
           context
         );
+        // Log warning if Python plugin is causing issues
+        if (stderrPreview.includes("libgstpython") || stderrPreview.includes("Python3.framework")) {
+          debugLogger.logInit(
+            `[Encoder Detection] Warning: Python plugin (libgstpython.dylib) is causing delays. This plugin should be excluded from the bundle.`,
+            context
+          );
+        }
       }
 
       if (existsFirst) return resolve(true);

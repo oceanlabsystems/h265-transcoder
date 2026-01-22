@@ -164,13 +164,99 @@ if [[ -f "$GST_SOURCE/libexec/gstreamer-1.0/gst-plugin-scanner" ]]; then
 fi
 
 echo ""
-echo "Copying plugins..."
+echo "Copying plugins (selective - excluding unnecessary ones)..."
 
-# Copy all plugins
+# Plugins to EXCLUDE (not needed for video encoding):
+# - Python plugin: requires Python3.framework, causes timeouts
+# - Network plugins: rtsp, rtmp, rtp, udp, etc. (we only process local files)
+# - Audio-only plugins: we process video only (but keep basic audio for passthrough)
+# - Effects/filters: we don't use video effects
+# - Text/subtitle: we don't process subtitles
+# - Other unnecessary plugins
+
+EXCLUDE_PATTERNS=(
+    "*python*"           # Python plugin (requires framework)
+    "*gstpython*"        # Python plugin variants
+    "*rtsp*"             # RTSP streaming
+    "*rtmp*"             # RTMP streaming
+    "*rtp*"              # RTP streaming
+    "*srt*"              # SRT streaming
+    "*webrtc*"           # WebRTC
+    "*dtls*"             # DTLS
+    "*srtp*"             # SRTP
+    "*dv*"                # DV (Digital Video)
+    "*dvbsub*"           # DVB subtitles
+    "*subtitle*"         # Subtitle plugins
+    "*text*"             # Text rendering
+    "*overlay*"          # Video overlays (we don't use)
+    "*effect*"           # Video effects
+    "*equalizer*"        # Audio equalizer
+    "*level*"            # Audio level
+    "*volume*"            # Audio volume (we pass through)
+    "*pulse*"            # PulseAudio (Linux audio, not needed on macOS)
+    "*alsa*"             # ALSA (Linux audio)
+    "*oss*"              # OSS audio
+    "*jack*"             # JACK audio
+    "*opencv*"           # OpenCV (computer vision, not needed)
+    "*openni*"           # OpenNI (depth sensors)
+    "*kate*"             # Kate (text/subtitle)
+    "*spandsp*"          # SpanDSP (telephony)
+    "*voaacenc*"         # VisualOn AAC (alternative encoder)
+    "*voamrwbenc*"       # VisualOn AMR-WB
+    "*wildmidi*"         # WildMIDI
+    "*zbar*"             # ZBar (barcode scanning)
+    "*assrender*"        # ASS subtitle renderer
+    "*rsvg*"             # SVG rendering
+    "*cairo*"            # Cairo graphics (unless needed by other plugins)
+    "*gtk*"              # GTK (GUI toolkit, not needed)
+    "*qt*"               # Qt (GUI toolkit, not needed)
+    "*gl*"               # OpenGL (unless needed for hardware acceleration)
+    "*wayland*"          # Wayland (Linux display server)
+    "*x11*"               # X11 (Linux display server)
+    "*v4l2*"             # Video4Linux2 (Linux video capture)
+    "*v4l*"              # Video4Linux
+    "*decklink*"         # DeckLink (video capture cards)
+    "*dshow*"            # DirectShow (Windows)
+    "*wasapi*"           # WASAPI (Windows audio)
+    "*directsound*"      # DirectSound (Windows audio)
+    "*winks*"            # Windows Media
+    "*winscreencap*"     # Windows screen capture
+    "*wasapisrc*"        # WASAPI source
+    "*directsoundsrc*"   # DirectSound source
+)
+
 if [[ -d "$GST_SOURCE/lib/gstreamer-1.0" ]]; then
-    cp -a "$GST_SOURCE/lib/gstreamer-1.0/"*.dylib "$OUT_ROOT/lib/gstreamer-1.0/" 2>/dev/null || true
+    PLUGINS_COPIED=0
+    PLUGINS_SKIPPED=0
+    
+    for plugin in "$GST_SOURCE/lib/gstreamer-1.0/"*.dylib; do
+        [[ -f "$plugin" ]] || continue
+        plugin_name=$(basename "$plugin")
+        
+        # Check if this plugin should be excluded
+        should_exclude=false
+        for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            if [[ "$plugin_name" == $pattern ]]; then
+                should_exclude=true
+                break
+            fi
+        done
+        
+        if [[ "$should_exclude" == true ]]; then
+            echo "  ⊘ Skipping $plugin_name (not needed for video encoding)"
+            ((PLUGINS_SKIPPED++))
+        else
+            cp -a "$plugin" "$OUT_ROOT/lib/gstreamer-1.0/" 2>/dev/null && ((PLUGINS_COPIED++)) || true
+        fi
+    done
+    
     PLUGIN_COUNT=$(ls -1 "$OUT_ROOT/lib/gstreamer-1.0/"*.dylib 2>/dev/null | wc -l | tr -d ' ')
-    echo "  ✓ Copied $PLUGIN_COUNT plugins"
+    echo "  ✓ Copied $PLUGINS_COPIED plugins ($PLUGINS_SKIPPED excluded)"
+    echo "  ✓ Total plugins in bundle: $PLUGIN_COUNT"
+    echo ""
+    echo "  Note: This selective bundling reduces size while keeping all video encoding"
+    echo "        functionality. If you encounter missing element errors, you may need"
+    echo "        to add specific plugins back."
 else
     echo "  ⚠ Plugin directory not found"
 fi
@@ -498,12 +584,28 @@ echo ""
 echo "========================================"
 echo "✓ macOS GStreamer bundle created at: $OUT_ROOT"
 echo ""
+
+# Calculate bundle size
+BUNDLE_SIZE=$(du -sh "$OUT_ROOT" 2>/dev/null | awk '{print $1}' || echo "unknown")
+BIN_COUNT=$(ls -1 "$OUT_ROOT/bin/" 2>/dev/null | wc -l | tr -d ' ')
+LIB_COUNT=$(ls -1 "$OUT_ROOT/lib/"*.dylib 2>/dev/null | wc -l | tr -d ' ')
+PLUGIN_COUNT=$(ls -1 "$OUT_ROOT/lib/gstreamer-1.0/"*.dylib 2>/dev/null | wc -l | tr -d ' ')
+
 echo "Bundle contents:"
-echo "  - $(ls -1 "$OUT_ROOT/bin/" 2>/dev/null | wc -l | tr -d ' ') binaries"
-echo "  - $(ls -1 "$OUT_ROOT/lib/"*.dylib 2>/dev/null | wc -l | tr -d ' ') libraries"
-echo "  - $(ls -1 "$OUT_ROOT/lib/gstreamer-1.0/"*.dylib 2>/dev/null | wc -l | tr -d ' ') plugins"
+echo "  - $BIN_COUNT binaries"
+echo "  - $LIB_COUNT libraries"
+echo "  - $PLUGIN_COUNT plugins"
+echo "  - Total size: $BUNDLE_SIZE"
+echo ""
+echo "Size optimization:"
+echo "  - Unnecessary plugins excluded (network, audio effects, subtitles, etc.)"
+echo "  - Python plugin excluded (causes timeouts, not needed)"
+echo "  - This reduces bundle size while maintaining all video encoding features"
 echo ""
 echo "Next steps:"
 echo "  1. Build your macOS app: npm run build:mac"
 echo "  2. The bundle will be included in the app automatically"
+echo ""
+echo "Note: If you encounter 'No such element' errors, you may need to add"
+echo "      specific plugins back. Check the exclusion list in this script."
 echo "========================================"

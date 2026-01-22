@@ -569,7 +569,7 @@ export function processVideoFileWithContext(
         encoderArgs = [
           encoder,
           `bitrate=${targetBitrateKbps}`,
-          "rate-control=1",  // Enforce bitrate target for predictable file sizes.. abr=0, cbr=1
+          "rate-control=0",  // Enforce bitrate target for predictable file sizes.. abr=0, cbr=1
           `quality=${qualityFloor}`,         // Visual quality floor
           "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
         ];

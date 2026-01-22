@@ -218,6 +218,9 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
         }
       }
       
+      // Note: Python plugin (libgstpython.dylib) should be excluded during bundling
+      // to prevent timeouts. See scripts/bundle-gstreamer-macos.sh
+      
       // Registry path in user's home directory
       const homeDir = os.homedir();
       envVars.GST_REGISTRY_1_0 = path.join(homeDir, 'Library', 'Caches', 'gstreamer-1.0', 'registry.bin');

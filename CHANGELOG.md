@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.7.0](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.6...v1.7.0) (2026-01-22)
+
+
+### Bug Fixes
+
+* **mac:** switch to CBR and set quality floor to avoid overcompression ([2bdf5e3](https://github.com/oceanlabsystems/h265-transcoder/commit/2bdf5e365131b3a4042fcc0b36fda0870023d152))
+
 ### [1.6.6](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.5...v1.6.6) (2026-01-22)
 
 

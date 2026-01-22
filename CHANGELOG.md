@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.6.6](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.5...v1.6.6) (2026-01-22)
+
+
+### Bug Fixes
+
+* **vt_enc:**  remove quality param to speed up transcoding. resolve python dep issue ([7ed2c2c](https://github.com/oceanlabsystems/h265-transcoder/commit/7ed2c2c1c8c56b51989e246350b0d5f6f91a9be2))
+
 ### [1.6.5](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.4...v1.6.5) (2026-01-22)
 
 ### [1.6.4](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.3...v1.6.4) (2026-01-22)

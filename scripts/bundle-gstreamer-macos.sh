@@ -61,15 +61,28 @@ fi
 
 # Find GStreamer source
 GST_SOURCE=""
+GST_IS_FRAMEWORK=0
 
 if [[ -d "$FRAMEWORK_PATH" ]]; then
     echo "Found GStreamer framework at: $FRAMEWORK_PATH"
+    echo "  (Official framework - recommended for distribution)"
     GST_SOURCE="$FRAMEWORK_PATH"
+    GST_IS_FRAMEWORK=1
 elif [[ -d "$HOMEBREW_ARM/lib" ]]; then
     echo "Found Homebrew GStreamer (ARM) at: $HOMEBREW_ARM"
+    echo ""
+    echo "⚠️  WARNING: Homebrew GStreamer has X11 dependencies that may cause issues!"
+    echo "    The official GStreamer framework is recommended for distribution."
+    echo "    Install from: https://gstreamer.freedesktop.org/download/"
+    echo ""
     GST_SOURCE="$HOMEBREW_ARM"
 elif [[ -d "$HOMEBREW_INTEL/lib" ]]; then
     echo "Found Homebrew GStreamer (Intel) at: $HOMEBREW_INTEL"
+    echo ""
+    echo "⚠️  WARNING: Homebrew GStreamer has X11 dependencies that may cause issues!"
+    echo "    The official GStreamer framework is recommended for distribution."
+    echo "    Install from: https://gstreamer.freedesktop.org/download/"
+    echo ""
     GST_SOURCE="$HOMEBREW_INTEL"
 elif [[ -f "$PKG_PATH" ]]; then
     echo "Found GStreamer .pkg, will extract..."
@@ -257,15 +270,27 @@ for iteration in 1 2 3 4 5 6 7 8 9 10; do
         actual_path=""
         lib_basename="$(basename "$lib_path")"
         
-        # Check various locations
+        # Check various locations (prioritize GStreamer source/framework)
         if [[ -f "$lib_path" ]]; then
             actual_path="$lib_path"
         elif [[ -f "$GST_SOURCE/lib/$lib_basename" ]]; then
             actual_path="$GST_SOURCE/lib/$lib_basename"
+        elif [[ -f "/Library/Frameworks/GStreamer.framework/Versions/1.0/lib/$lib_basename" ]]; then
+            # Fallback to installed framework even if using different source
+            actual_path="/Library/Frameworks/GStreamer.framework/Versions/1.0/lib/$lib_basename"
         elif [[ -f "/opt/homebrew/lib/$lib_basename" ]]; then
             actual_path="/opt/homebrew/lib/$lib_basename"
         elif [[ -f "/usr/local/lib/$lib_basename" ]]; then
             actual_path="/usr/local/lib/$lib_basename"
+        # Also check Homebrew opt directories for transitive deps
+        elif [[ -d "/opt/homebrew/opt" ]]; then
+            # Search in Homebrew opt packages (slow but thorough)
+            for opt_dir in /opt/homebrew/opt/*/lib; do
+                if [[ -f "$opt_dir/$lib_basename" ]]; then
+                    actual_path="$opt_dir/$lib_basename"
+                    break
+                fi
+            done
         fi
         
         if [[ -n "$actual_path" ]] && [[ -f "$actual_path" ]]; then
@@ -429,11 +454,44 @@ else
     echo "    Try running manually: $OUT_ROOT/bin/gst-inspect-1.0 --version"
 fi
 
-# Check for VideoToolbox encoder
+# Check for applemedia plugin (provides VideoToolbox encoders)
+echo ""
+echo "Checking Apple media support..."
+if [[ -f "$OUT_ROOT/lib/gstreamer-1.0/libgstapplemedia.dylib" ]]; then
+    echo "  ✓ libgstapplemedia.dylib present"
+    
+    # Try to load the plugin
+    APPLEMEDIA_OUTPUT=$("$OUT_ROOT/bin/gst-inspect-1.0" applemedia 2>&1) || true
+    if echo "$APPLEMEDIA_OUTPUT" | grep -q "Plugin Details"; then
+        echo "  ✓ applemedia plugin loads successfully"
+        # List available elements
+        ELEMENTS=$(echo "$APPLEMEDIA_OUTPUT" | grep -E "^\s+vtenc|^\s+vtdec|^\s+avf" | head -10)
+        if [[ -n "$ELEMENTS" ]]; then
+            echo "    Available elements:"
+            echo "$ELEMENTS" | while read -r line; do echo "      $line"; done
+        fi
+    else
+        echo "  ⚠ applemedia plugin failed to load"
+        # Show error if any
+        ERRORS=$(echo "$APPLEMEDIA_OUTPUT" | grep -i "error\|failed\|not loaded" | head -5)
+        if [[ -n "$ERRORS" ]]; then
+            echo "    Errors:"
+            echo "$ERRORS" | while read -r line; do echo "      $line"; done
+        fi
+    fi
+else
+    echo "  ⚠ libgstapplemedia.dylib not found in bundle"
+fi
+
+# Check for VideoToolbox H.265 encoder specifically
 if "$OUT_ROOT/bin/gst-inspect-1.0" vtenc_h265 >/dev/null 2>&1; then
     echo "  ✓ vtenc_h265 (VideoToolbox H.265 encoder) available"
 else
-    echo "  ⚠ vtenc_h265 not found - VideoToolbox encoding may not be available"
+    echo "  ⚠ vtenc_h265 not found - VideoToolbox H.265 encoding not available"
+    # Check if we at least have x265
+    if "$OUT_ROOT/bin/gst-inspect-1.0" x265enc >/dev/null 2>&1; then
+        echo "    (x265enc software encoder is available as fallback)"
+    fi
 fi
 
 echo ""

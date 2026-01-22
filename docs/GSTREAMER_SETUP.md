@@ -85,26 +85,34 @@ The application automatically:
 - Architecture: x64 and ia32 (x86)
 
 ### macOS
-- ✅ Supported via bundling script
+- ✅ Supported via bundling script with official GStreamer framework
 - The bundling script handles:
-  - Extracting from the official GStreamer framework or using Homebrew installation
+  - Using the official GStreamer framework (recommended) or Homebrew as fallback
   - Copying all required dylibs to the bundle
   - Rewriting library paths with `install_name_tool` to use `@loader_path` relative paths
+  - Re-signing binaries with `codesign` after modification
 - Run: `npm run download-gstreamer` on macOS
 - Or manually: `bash scripts/bundle-gstreamer-macos.sh`
 
 #### macOS Prerequisites
-Install GStreamer using one of these methods:
 
-**Option 1: Official Framework (Recommended)**
+**Option 1: Official Framework (Strongly Recommended)**
+
+The official GStreamer framework is built specifically for macOS distribution and doesn't have X11 dependencies that can cause plugin loading failures.
+
 1. Download from https://gstreamer.freedesktop.org/download/
-2. Install the .pkg file
+2. Install the .pkg file (installs to `/Library/Frameworks/GStreamer.framework/`)
 3. Run the bundling script
 
-**Option 2: Homebrew**
+**Option 2: Homebrew (Not Recommended for Distribution)**
+
+⚠️ **Warning**: Homebrew GStreamer is built with X11 support, which adds dependencies that may not be available on end-user machines. This can cause plugins like `applemedia` (VideoToolbox) to fail to load.
+
 ```bash
 brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 ```
+
+If you must use Homebrew, the bundling script will attempt to bundle all dependencies, but some plugins may not work.
 
 ### Linux
 - ✅ Supported via **system GStreamer** (recommended)
@@ -210,6 +218,21 @@ This means the bundled GStreamer has hardcoded library paths. Fix by:
    - Apple Silicon or Intel Mac with hardware HEVC support
 2. Verify with system GStreamer: `gst-inspect-1.0 vtenc_h265`
 3. If system GStreamer works but bundled doesn't, re-run the bundling script
+
+### macOS: Plugin loading failures (X11/libxcb errors)
+If you see errors like:
+```
+Library not loaded: /opt/homebrew/opt/libxcb/lib/libxcb.1.dylib
+```
+
+This is caused by using **Homebrew GStreamer** which has X11 dependencies. The fix is to use the **official GStreamer framework** instead:
+
+1. Uninstall Homebrew GStreamer: `brew uninstall gstreamer`
+2. Download official framework from https://gstreamer.freedesktop.org/download/
+3. Install the .pkg file
+4. Re-run the bundling script: `bash scripts/bundle-gstreamer-macos.sh`
+
+The official framework is built specifically for macOS and doesn't have X11 dependencies.
 
 ### Build size
 - GStreamer adds ~100-200MB to the application size

@@ -129,18 +129,34 @@ jobs:
       - name: Bundle GStreamer for macOS
         if: matrix.platform == 'mac'
         run: |
-          echo "Installing GStreamer via Homebrew..."
-          brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
-
+          echo "Installing official GStreamer framework..."
+          echo "Using official framework instead of Homebrew to avoid X11 dependencies"
+          echo ""
+          
+          # Download official GStreamer framework (universal binary - works on Intel and Apple Silicon)
+          GSTREAMER_VERSION="1.24.10"
+          PKG_URL="https://gstreamer.freedesktop.org/data/pkg/osx/${GSTREAMER_VERSION}/gstreamer-1.0-${GSTREAMER_VERSION}-universal.pkg"
+          PKG_FILE="gstreamer.pkg"
+          
+          echo "Downloading GStreamer ${GSTREAMER_VERSION} from freedesktop.org..."
+          curl -L -o "$PKG_FILE" "$PKG_URL"
+          
+          echo "Installing GStreamer framework..."
+          sudo installer -pkg "$PKG_FILE" -target /
+          
+          echo "Verifying installation..."
+          ls -la /Library/Frameworks/GStreamer.framework/Versions/1.0/bin/ | head -10
+          
           echo ""
           echo "Running macOS GStreamer bundling script..."
-          echo "This will copy all dylibs and rewrite paths with install_name_tool"
+          echo "This will copy from the official framework and rewrite paths with install_name_tool"
           echo ""
           
           # Run the bundling script which handles:
-          # 1. Copying binaries, plugins, and all dylib dependencies
+          # 1. Copying binaries, plugins, and all dylib dependencies from the framework
           # 2. Rewriting library paths to use @loader_path
-          # 3. Verifying the bundle works
+          # 3. Re-signing binaries after modification
+          # 4. Verifying the bundle works
           bash scripts/bundle-gstreamer-macos.sh
           
           echo ""
@@ -150,6 +166,9 @@ jobs:
           echo ""
           echo "=== Verifying dylib paths are rewritten ==="
           otool -L gstreamer/macos/bin/gst-inspect-1.0 | head -20
+          echo ""
+          echo "=== Checking for VideoToolbox support ==="
+          ./gstreamer/macos/bin/gst-inspect-1.0 applemedia 2>&1 | head -30 || echo "applemedia check completed"
           echo ""
           echo "GStreamer bundling complete for macOS"
         continue-on-error: false

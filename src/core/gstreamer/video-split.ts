@@ -558,40 +558,22 @@ export function processVideoFileWithContext(
           "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
         ];
       } else {
-        // BITRATE MODE: Duration is known
-        // For very high bitrates (>100 Mbps), use quality-based encoding for better performance
-        // VideoToolbox struggles with bitrate targeting at very high rates
-        const isVeryHighBitrate = targetBitrateKbps > 100000; // > 100 Mbps
+        // BITRATE MODE: Duration is known, use CBR for predictable file sizes
+        // CBR (Constant Bitrate) ensures output matches our target compression ratio
+        // Quality floor prevents quality from dropping too low at the expense of bitrate accuracy
+        const qualityFloor = 0.5;  // Minimum quality threshold
         
-        if (isVeryHighBitrate) {
-          // Use quality-based encoding for very high bitrate sources
-          // This is faster and more efficient than bitrate targeting at high rates
-          const qualityValues = getQualityForCompressionRatio(compressionRatio);
-          
-          debugLogger.info(
-            `[VideoToolbox] Very high bitrate (${(targetBitrateKbps / 1000).toFixed(2)} Mbps) - using QUALITY mode for better performance. Compression: ${compressionRatio}x → Quality: ${qualityValues.vtQuality.toFixed(2)}`
-          );
-          
-          encoderArgs = [
-            encoder,
-            `quality=${qualityValues.vtQuality.toFixed(3)}`,
-            "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
-          ];
-        } else {
-          // For normal bitrates (<100 Mbps), use ABR (Average Bitrate) mode
-          // ABR is faster than CBR and provides predictable file sizes
-          // NOTE: Do NOT set quality parameter with bitrate - it causes conflicts and slowdowns
-          debugLogger.info(
-            `[VideoToolbox] Duration known - using ABR mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps)`
-          );
-          
-          encoderArgs = [
-            encoder,
-            `bitrate=${targetBitrateKbps}`,
-            "rate-control=0",  // ABR (Average Bitrate) - faster than CBR
-            "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
-          ];
-        }
+        debugLogger.info(
+          `[VideoToolbox] Duration known - using CBR mode. Compression: ${compressionRatio}x → Bitrate: ${targetBitrateKbps} kbps (${(targetBitrateKbps / 1000).toFixed(2)} Mbps), Quality floor: ${qualityFloor}`
+        );
+        
+        encoderArgs = [
+          encoder,
+          `bitrate=${targetBitrateKbps}`,
+          "rate-control=1",  // Enforce bitrate target for predictable file sizes.. abr=0, cbr=1
+          `quality=${qualityFloor}`,  // Quality floor to prevent excessive quality loss
+          "allow-frame-reordering=true",     // Enable B-frames for compression efficiency
+        ];
       }
       
       debugLogger.logEncoderConfig(

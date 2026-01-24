@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.7.1](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.7.0...v1.7.1) (2026-01-24)
+
+
+### Bug Fixes
+
+* gstreamer bundling for linux ([7539d8f](https://github.com/oceanlabsystems/h265-transcoder/commit/7539d8f2c1941cde024c789864303f8dcfab3f54))
+
 ## [1.7.0](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.6.6...v1.7.0) (2026-01-22)
 
 

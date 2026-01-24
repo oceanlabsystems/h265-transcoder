@@ -50,13 +50,18 @@ rm -rf "$OUT_ROOT" 2>/dev/null || {
 mkdir -p "$OUT_ROOT"
 
 # Build inside Ubuntu 20.04 to lock glibc baseline (2.31)
+# Run as root to install packages, then fix permissions afterward
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+
 docker run --rm \
-  -u "$(id -u):$(id -g)" \
   -v "$PROJECT_DIR:/work" \
   ubuntu:20.04 \
-  bash -lc "
+  bash -c "
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
+    
+    # Install packages as root
     apt-get update
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -188,6 +193,9 @@ docker run --rm \
 
     echo 'Bundle created. Verifying bundled gst-inspect runs (inside container)...'
     /work/gstreamer/linux/bin/gst-inspect-1.0 --version || true
+    
+    # Fix ownership of output files to match host user
+    chown -R $HOST_UID:$HOST_GID /work/gstreamer/linux || true
   "
 
 echo ""

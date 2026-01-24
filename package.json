@@ -1,6 +1,6 @@
 {
   "name": "h265-transcoder",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "description": "An application to batch process videofiles into time based chunks and output to H.265",
   "main": "./out/main/index.js",
   "bin": {

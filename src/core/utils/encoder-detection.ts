@@ -442,23 +442,18 @@ async function checkGStreamerElement(
 
       if (existsFirst) return resolve(true);
 
-      // Linux/macOS: if bundled GStreamer exists, also try system GStreamer as fallback.
-      // This handles two cases:
-      // 1. Bundled GStreamer can't execute (glibc/loader errors on Linux, dyld errors on macOS)
-      // 2. Bundled GStreamer doesn't have the element (e.g., vaapih265enc which requires system drivers)
+      // Only fallback to system GStreamer if bundled GStreamer can't execute (GLIBC/library errors)
+      // Do NOT fallback for missing encoders - they should be in the bundle
       const isFallbackPlatform = process.platform === "linux" || process.platform === "darwin";
       const shouldTrySystem =
         isFallbackPlatform &&
         binPath &&
         inspectPath !== inspectExecutable &&
-        (shouldFallbackToSystemGStreamer(first.stderr) || !existsFirst);
+        shouldFallbackToSystemGStreamer(first.stderr);
 
       if (shouldTrySystem) {
-        const reason = shouldFallbackToSystemGStreamer(first.stderr)
-          ? "Bundled GStreamer appears incompatible"
-          : "Element not found in bundled GStreamer";
         debugLogger.logInit(
-          `[Encoder Detection] ${reason}; retrying ${elementName} check with system GStreamer...`,
+          `[Encoder Detection] Bundled GStreamer appears incompatible; retrying ${elementName} check with system GStreamer...`,
           context
         );
         
@@ -510,6 +505,8 @@ async function checkGStreamerElement(
         return resolve(existsSecond);
       }
 
+      // Encoder not found in bundled GStreamer and no compatibility issues
+      // Return false - encoder should be in the bundle
       return resolve(false);
     })().catch(() => resolve(false));
   });

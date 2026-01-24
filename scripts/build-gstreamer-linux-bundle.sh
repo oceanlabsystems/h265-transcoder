@@ -62,6 +62,7 @@ docker run --rm \
     export DEBIAN_FRONTEND=noninteractive
     
     # Install packages as root
+    # Include VA-API plugins for hardware encoding (msdkh265enc, vaapih265enc)
     apt-get update
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -70,7 +71,8 @@ docker run --rm \
       gstreamer1.0-plugins-good \
       gstreamer1.0-plugins-bad \
       gstreamer1.0-plugins-ugly \
-      gstreamer1.0-libav
+      gstreamer1.0-libav \
+      gstreamer1.0-vaapi
 
     mkdir -p /work/gstreamer/linux/bin /work/gstreamer/linux/lib /work/gstreamer/linux/libexec
 
@@ -84,6 +86,7 @@ docker run --rm \
     fi
 
     # Core libs (best-effort: copy GStreamer-related libs; do NOT copy libc)
+    # Include VA-API libraries for hardware encoding support
     if [ -d /usr/lib/x86_64-linux-gnu ]; then
       find /usr/lib/x86_64-linux-gnu -maxdepth 1 -type f \\( \
         -name 'libgstreamer-*.so*' -o \
@@ -95,7 +98,9 @@ docker run --rm \
         -name 'libgmodule-2.0.so*' -o \
         -name 'libgio-2.0.so*' -o \
         -name 'libgthread-2.0.so*' -o \
-        -name 'libgirepository-1.0.so*' \
+        -name 'libgirepository-1.0.so*' -o \
+        -name 'libva*.so*' -o \
+        -name 'libdrm.so*' \
       \\) -print0 | xargs -0 -I{} cp -a {} /work/gstreamer/linux/lib/ || true
     fi
 

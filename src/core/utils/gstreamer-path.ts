@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execSync } from 'child_process';
 
 /**
  * Runtime context for GStreamer path resolution
@@ -18,6 +19,63 @@ export interface GStreamerPaths {
   pluginPath: string;
   libPath: string;
   env: NodeJS.ProcessEnv;
+}
+
+// Cache for compatibility check results to avoid repeated tests
+const compatibilityCache = new Map<string, boolean>();
+
+/**
+ * Check if bundled GStreamer can actually execute (not just exist)
+ * Returns true if compatible, false if incompatible (GLIBC/library errors)
+ */
+function isBundledGStreamerCompatible(
+  gstLaunchPath: string,
+  env: NodeJS.ProcessEnv
+): boolean {
+  const cacheKey = gstLaunchPath;
+  if (compatibilityCache.has(cacheKey)) {
+    return compatibilityCache.get(cacheKey)!;
+  }
+
+  // Only check on Linux/macOS (Windows doesn't have GLIBC issues)
+  if (process.platform === 'win32') {
+    compatibilityCache.set(cacheKey, true);
+    return true;
+  }
+
+  // Quick test: try to run gst-launch-1.0 --version
+  // This will fail immediately if there are GLIBC/library issues
+  try {
+    // Use execSync with a short timeout - GLIBC errors happen immediately
+    execSync(`"${gstLaunchPath}" --version`, {
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 2000, // 2 second timeout
+      encoding: 'utf8',
+    });
+    
+    // If we get here, it executed successfully
+    compatibilityCache.set(cacheKey, true);
+    return true;
+  } catch (error: any) {
+    // Check stderr/stdout for GLIBC/library compatibility errors
+    const errorText = ((error.stderr || '') + (error.stdout || '') + (error.message || '')).toLowerCase();
+    const hasCompatibilityError =
+      errorText.includes('glibc_') ||
+      (errorText.includes('libc.so.6') &&
+        errorText.includes('version') &&
+        errorText.includes('not found')) ||
+      errorText.includes('error while loading shared libraries') ||
+      errorText.includes('library not loaded') ||
+      errorText.includes('dyld') ||
+      errorText.includes('reason: image not found') ||
+      errorText.includes('mach-o');
+
+    // If we see compatibility errors, it's incompatible
+    const isCompatible = !hasCompatibilityError;
+    compatibilityCache.set(cacheKey, isCompatible);
+    return isCompatible;
+  }
 }
 
 /**
@@ -133,7 +191,7 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
   const hasBundledGStreamer = fs.existsSync(gstLaunchPath);
 
   if (hasBundledGStreamer) {
-    // Use bundled GStreamer
+    // Prepare environment variables first (needed for compatibility check)
     const envVars: NodeJS.ProcessEnv = {
       PATH: `${binPath}${path.delimiter}${process.env.PATH}`,
       GST_PLUGIN_PATH: pluginPath,
@@ -226,15 +284,39 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
       envVars.GST_REGISTRY_1_0 = path.join(homeDir, 'Library', 'Caches', 'gstreamer-1.0', 'registry.bin');
     }
     
-    return {
-      binPath,
-      pluginPath,
-      libPath,
-      env: envVars,
-    };
-  } else {
+    // Check if bundled GStreamer is actually compatible (can execute)
+    // On Linux/macOS, this checks for GLIBC/library compatibility issues
+    // Note: Bundles should be built with Ubuntu 20.04 (GLIBC 2.31) for maximum compatibility
+    const isCompatible = isBundledGStreamerCompatible(gstLaunchPath, envVars);
+    
+    if (!isCompatible) {
+      // Bundled GStreamer exists but is incompatible (e.g., GLIBC mismatch)
+      // This can happen if the bundle was built on a newer system
+      // Fall back to system GStreamer as a safety measure
+      console.warn(
+        'Bundled GStreamer is incompatible with this system (likely GLIBC/library mismatch). ' +
+        'Falling back to system GStreamer. ' +
+        'To fix: rebuild the bundle using scripts/build-gstreamer-linux-bundle.sh (uses Ubuntu 20.04 for compatibility)'
+      );
+      
+      // Continue to fallback logic below
+    } else {
+      // Bundled GStreamer is compatible, use it
+      return {
+        binPath,
+        pluginPath,
+        libPath,
+        env: envVars,
+      };
+    }
+  }
+  
+  // Fall back to system GStreamer (either not found or incompatible)
+  {
     // Fall back to system GStreamer - try common installation locations
-    console.warn('Bundled GStreamer not found, falling back to system GStreamer');
+    if (!hasBundledGStreamer) {
+      console.warn('Bundled GStreamer not found, falling back to system GStreamer');
+    }
     
     if (platform === 'win32') {
       // Try common Windows GStreamer installation locations

@@ -200,40 +200,39 @@ jobs:
           echo "GStreamer bundling complete for macOS"
         continue-on-error: false
 
-      - name: Install GStreamer for Linux
+      - name: Bundle GStreamer for Linux
         if: matrix.platform == 'linux'
         run: |
-          echo "Installing GStreamer development packages..."
-          sudo apt-get update
-          sudo apt-get install -y \
-            gstreamer1.0-tools \
-            gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad \
-            gstreamer1.0-plugins-ugly \
-            gstreamer1.0-libav \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libx265-dev
-
-          mkdir -p gstreamer/linux/bin
-          mkdir -p gstreamer/linux/lib
-
-          cp /usr/bin/gst-launch-1.0 gstreamer/linux/bin/ || true
-          cp /usr/bin/gst-inspect-1.0 gstreamer/linux/bin/ || true
-          cp /usr/bin/gst-discoverer-1.0 gstreamer/linux/bin/ || true
-
-          cp -P /usr/lib/x86_64-linux-gnu/libgstreamer-1.0.so* gstreamer/linux/lib/ || true
-          cp -P /usr/lib/x86_64-linux-gnu/libgstbase-1.0.so* gstreamer/linux/lib/ || true
-          cp -P /usr/lib/x86_64-linux-gnu/libgstvideo-1.0.so* gstreamer/linux/lib/ || true
-          cp -P /usr/lib/x86_64-linux-gnu/libgstaudio-1.0.so* gstreamer/linux/lib/ || true
-          cp -P /usr/lib/x86_64-linux-gnu/libgstpbutils-1.0.so* gstreamer/linux/lib/ || true
-
-          mkdir -p gstreamer/linux/lib/gstreamer-1.0
-          cp /usr/lib/x86_64-linux-gnu/gstreamer-1.0/*.so gstreamer/linux/lib/gstreamer-1.0/ || true
-
-          ls -la gstreamer/linux/bin/
-          echo "GStreamer setup complete for Linux"
+          echo "Bundling GStreamer using Ubuntu 20.04 baseline for GLIBC compatibility..."
+          echo "This ensures the bundle works on older Ubuntu/Debian systems (GLIBC 2.31+)"
+          echo ""
+          
+          # Use the bundling script which builds in Docker with Ubuntu 20.04
+          # This ensures GLIBC 2.31 compatibility (works on Ubuntu 20.04+)
+          bash scripts/build-gstreamer-linux-bundle.sh
+          
+          echo ""
+          echo "=== Verifying bundle ==="
+          ls -la gstreamer/linux/bin/ || echo "bin directory not found"
+          ls -la gstreamer/linux/lib/ | head -20 || echo "lib directory not found"
+          
+          # Verify the bundle has the required binaries
+          if [ -f "gstreamer/linux/bin/gst-launch-1.0" ]; then
+            echo "✓ gst-launch-1.0 found"
+          else
+            echo "✗ ERROR: gst-launch-1.0 not found in bundle!"
+            exit 1
+          fi
+          
+          if [ -f "gstreamer/linux/bin/gst-inspect-1.0" ]; then
+            echo "✓ gst-inspect-1.0 found"
+          else
+            echo "✗ ERROR: gst-inspect-1.0 not found in bundle!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "GStreamer bundling complete for Linux"
         continue-on-error: false
 
       - name: Build CLI

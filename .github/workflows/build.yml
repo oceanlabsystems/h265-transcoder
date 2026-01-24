@@ -49,6 +49,13 @@ jobs:
         env:
           npm_config_optional: true
 
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
       - name: Install GStreamer for Windows
         if: matrix.platform == 'win'
         shell: pwsh
@@ -259,18 +266,10 @@ jobs:
           npm run build
           npx electron-builder --linux --publish never
 
-      - name: Get version from package.json
-        if: matrix.platform == 'linux'
-        id: get_package_version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Package version: $VERSION"
-
       - name: Create Linux CLI package
         if: matrix.platform == 'linux'
         run: |
-          VERSION="${{ steps.get_package_version.outputs.version }}"
+          VERSION="${{ steps.get_version.outputs.version }}"
           echo "Creating Linux CLI package v${VERSION}..."
           mkdir -p dist/linux-cli/cli
           mkdir -p dist/linux-cli/service
@@ -312,7 +311,7 @@ jobs:
         if: matrix.platform == 'win'
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installer-v${{ steps.get_version.outputs.version }}
           path: dist/*Setup*.exe
           retention-days: 90
           if-no-files-found: error
@@ -321,7 +320,7 @@ jobs:
         if: matrix.platform == 'mac'
         uses: actions/upload-artifact@v4
         with:
-          name: macos-installer
+          name: macos-installer-v${{ steps.get_version.outputs.version }}
           path: dist/**/*.dmg
           retention-days: 90
           if-no-files-found: warn
@@ -330,7 +329,7 @@ jobs:
         if: matrix.platform == 'linux'
         uses: actions/upload-artifact@v4
         with:
-          name: linux-installer
+          name: linux-installer-v${{ steps.get_version.outputs.version }}
           path: |
             dist/**/*.AppImage
             dist/**/*.deb
@@ -341,7 +340,7 @@ jobs:
         if: matrix.platform == 'linux'
         uses: actions/upload-artifact@v4
         with:
-          name: linux-cli
+          name: linux-cli-v${{ steps.get_version.outputs.version }}
           path: dist/h265-transcoder-cli-*-linux-x64.tar.gz
           retention-days: 90
           if-no-files-found: warn
@@ -469,11 +468,11 @@ jobs:
             - [README](README.md) - Full documentation
             - [Docker Setup](README.md#docker-headless-linux-servers) - Docker deployment guide
           files: |
-            artifacts/windows-installer/*Setup*.exe
-            artifacts/macos-installer/*.dmg
-            artifacts/linux-installer/*.AppImage
-            artifacts/linux-installer/*.deb
-            artifacts/linux-cli/*.tar.gz
+            artifacts/windows-installer-v${{ steps.get_version.outputs.version }}/*Setup*.exe
+            artifacts/macos-installer-v${{ steps.get_version.outputs.version }}/*.dmg
+            artifacts/linux-installer-v${{ steps.get_version.outputs.version }}/*.AppImage
+            artifacts/linux-installer-v${{ steps.get_version.outputs.version }}/*.deb
+            artifacts/linux-cli-v${{ steps.get_version.outputs.version }}/*.tar.gz
           draft: false
           prerelease: false
         env:

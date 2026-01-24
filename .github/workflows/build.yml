@@ -259,10 +259,19 @@ jobs:
           npm run build
           npx electron-builder --linux --publish never
 
+      - name: Get version from package.json
+        if: matrix.platform == 'linux'
+        id: get_package_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
       - name: Create Linux CLI package
         if: matrix.platform == 'linux'
         run: |
-          echo "Creating Linux CLI package..."
+          VERSION="${{ steps.get_package_version.outputs.version }}"
+          echo "Creating Linux CLI package v${VERSION}..."
           mkdir -p dist/linux-cli/cli
           mkdir -p dist/linux-cli/service
           
@@ -294,9 +303,9 @@ jobs:
           cp scripts/install-linux.sh dist/linux-cli/install.sh
           chmod +x dist/linux-cli/install.sh
           
-          # Create tarball
+          # Create tarball with version in name
           cd dist
-          tar -czvf h265-transcoder-cli-linux-x64.tar.gz linux-cli
+          tar -czvf h265-transcoder-cli-${VERSION}-linux-x64.tar.gz linux-cli
           ls -la *.tar.gz
 
       - name: Upload Windows artifacts
@@ -333,7 +342,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-cli
-          path: dist/h265-transcoder-cli-linux-x64.tar.gz
+          path: dist/h265-transcoder-cli-*-linux-x64.tar.gz
           retention-days: 90
           if-no-files-found: warn
 
@@ -446,9 +455,9 @@ jobs:
             ```
 
             **Linux CLI Package:**
-            Download `h265-transcoder-cli-linux-x64.tar.gz` and run:
+            Download `h265-transcoder-cli-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz` and run:
             ```bash
-            tar -xzvf h265-transcoder-cli-linux-x64.tar.gz
+            tar -xzvf h265-transcoder-cli-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz
             cd linux-cli
             sudo ./install.sh
             ```

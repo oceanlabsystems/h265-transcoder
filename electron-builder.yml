@@ -87,6 +87,8 @@ linux:
     - gstreamer1.0-libav
 appImage:
   artifactName: ${name}-${version}.${ext}
+deb:
+  artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 # Uncomment and configure when auto-updates are set up
 # publish:

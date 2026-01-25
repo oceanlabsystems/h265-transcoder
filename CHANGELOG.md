@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.7.7](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.7.6...v1.7.7) (2026-01-25)
+
+
+### Bug Fixes
+
+* linux encoder detection ([171f493](https://github.com/oceanlabsystems/h265-transcoder/commit/171f49309ab849605246edaa93ec779d441d8221))
+
 ### [1.7.6](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.7.5...v1.7.6) (2026-01-24)
 
 ### [1.7.5](https://github.com/oceanlabsystems/h265-transcoder/compare/v1.7.4...v1.7.5) (2026-01-24)

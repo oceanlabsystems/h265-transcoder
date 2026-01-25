@@ -54,7 +54,7 @@ mkdir -p "$OUT_ROOT"
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
-docker run --rm \
+docker run --rm -i \
   -e HOST_UID="$HOST_UID" \
   -e HOST_GID="$HOST_GID" \
   -v "$PROJECT_DIR:/work" \

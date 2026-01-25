@@ -73,6 +73,7 @@ apt-get install -y --no-install-recommends \
   ca-certificates \
   gstreamer1.0-tools \
   gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-base-apps \
   gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
@@ -85,6 +86,16 @@ mkdir -p /work/gstreamer/linux/bin /work/gstreamer/linux/lib /work/gstreamer/lin
 
 # Binaries
 cp -a /usr/bin/gst-* /work/gstreamer/linux/bin/ || true
+
+# Verify critical binaries are included
+echo "Verifying critical binaries are bundled..."
+for bin in gst-launch-1.0 gst-inspect-1.0 gst-discoverer-1.0; do
+  if [ -f "/work/gstreamer/linux/bin/$bin" ]; then
+    echo "  ✓ $bin found"
+  else
+    echo "  ✗ WARNING: $bin not found in bundle!"
+  fi
+done
 
 # Plugins (Ubuntu/Debian layout)
 if [ -d /usr/lib/x86_64-linux-gnu/gstreamer-1.0 ]; then

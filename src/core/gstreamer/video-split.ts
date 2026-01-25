@@ -335,6 +335,7 @@ export function processVideoFileWithContext(
     let totalChunks = 0;
     let inputFileSize = 0;
     let durationIsEstimated = false;
+    let metadataIsCorrupt = false; // True when we detected corrupt duration data (vs just missing discoverer)
 
     // Get file size for validation
     try {
@@ -363,6 +364,7 @@ export function processVideoFileWithContext(
           (inputFileSize * 8) / (estimatedBitrateMbps * 1000000); // seconds
         fileDuration = estimatedDuration;
         durationIsEstimated = true;
+        metadataIsCorrupt = true; // Discoverer returned bad data, so progressreport will too
         debugLogger.info(
           `[Video Info] Estimated duration: ${Math.round(fileDuration)}s (${Math.round(fileDuration / 60)} minutes)`
         );
@@ -422,6 +424,7 @@ export function processVideoFileWithContext(
         const estimatedBitrateMbps = 20; // Conservative estimate for typical video
         fileDuration = (inputFileSize * 8) / (estimatedBitrateMbps * 1000000);
         durationIsEstimated = true;
+        metadataIsCorrupt = true; // Discoverer returned bad data, so progressreport will too
         totalChunks = Math.ceil(fileDuration / chunkDuration);
         
         // Recalculate bitrate with estimated duration
@@ -1204,8 +1207,12 @@ export function processVideoFileWithContext(
     // Send initial progress update
     sendProgressUpdate();
 
-    // Track if we originally detected corrupt metadata (used to prevent progressreport override)
-    const initialDurationWasEstimated = durationIsEstimated;
+    // Track if metadata was detected as corrupt (used to prevent progressreport override)
+    // Note: metadataIsCorrupt is different from durationIsEstimated
+    // - durationIsEstimated: true when we had to estimate (discoverer missing OR corrupt data)
+    // - metadataIsCorrupt: true only when discoverer returned bad data (progressreport will also be wrong)
+    // When discoverer is just missing but metadata is fine, progressreport can give us accurate duration
+    const initialMetadataWasCorrupt = metadataIsCorrupt;
 
     // Parse progressreport output to get input position
     // Actual format: "progressreport0 (00:00:03): 0 / 1352 seconds ( 0.0 %)"
@@ -1221,11 +1228,11 @@ export function processVideoFileWithContext(
         // Update position (can be 0 at start, that's valid)
         currentPositionSeconds = position;
 
-        // If we originally estimated duration due to corrupt metadata, DON'T override it
+        // If we detected corrupt metadata, DON'T override with progressreport
         // progressreport reads the same corrupt metadata, so it would give us the same wrong value
-        if (initialDurationWasEstimated) {
+        if (initialMetadataWasCorrupt) {
           // Just log that we're ignoring progressreport's duration
-          if (duration !== fileDuration) {
+          if (Math.abs(duration - fileDuration) > 10) {
             debugLogger.info(
               `[Progress] Ignoring progressreport duration (${duration}s) - using estimated duration (${fileDuration}s) due to corrupt metadata`
             );
@@ -1233,13 +1240,30 @@ export function processVideoFileWithContext(
           return true;
         }
 
-        // If we didn't have corrupt metadata initially, trust progressreport for better accuracy
-        if (duration > 0 && fileDuration === 0) {
-          fileDuration = duration;
-          totalChunks = Math.ceil(fileDuration / chunkDuration);
-          debugLogger.info(
-            `[Progress] Duration from progressreport: ${duration}s, chunks: ${totalChunks}`
-          );
+        // If we had to estimate duration (e.g., discoverer missing) but metadata isn't corrupt,
+        // trust progressreport for better accuracy
+        if (duration > 0 && (fileDuration === 0 || durationIsEstimated)) {
+          // Sanity check: progressreport duration should be reasonable for the file size
+          const estimatedBitrateMbps = (inputFileSize * 8) / (duration * 1000000);
+          const MAX_REASONABLE_BITRATE_MBPS = 500;
+          
+          if (estimatedBitrateMbps <= MAX_REASONABLE_BITRATE_MBPS) {
+            // Duration seems reasonable, use it
+            if (Math.abs(duration - fileDuration) > 10) {
+              debugLogger.info(
+                `[Progress] Updated duration from progressreport: ${duration}s (was: ${Math.round(fileDuration)}s estimated)`
+              );
+            }
+            fileDuration = duration;
+            durationIsEstimated = false; // Now we have real duration
+            totalChunks = Math.ceil(fileDuration / chunkDuration);
+          } else {
+            // progressreport duration is also bad, mark as corrupt
+            debugLogger.warn(
+              `[Progress] progressreport duration (${duration}s) also appears corrupt (${estimatedBitrateMbps.toFixed(0)} Mbps) - keeping estimated duration`
+            );
+            metadataIsCorrupt = true;
+          }
         }
 
         return true;

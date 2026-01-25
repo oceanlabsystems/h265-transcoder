@@ -5,6 +5,11 @@
 #   1. Uncomment the 'devices' section below
 #   2. Set encoder: vaapih265 in config/config.yaml
 #   3. Verify with: docker exec h265-transcoder vainfo
+#
+# Hardware Encoding (NVIDIA NVENC):
+#   1. Uncomment the 'deploy.reservations.devices' section below
+#   2. Set encoder: nvh265 in config/config.yaml
+#   3. Requires NVIDIA Container Toolkit on host
 
 version: '3.8'
 
@@ -19,6 +24,15 @@ services:
     # Uncomment for Intel VA-API hardware encoding
     # devices:
     #   - /dev/dri:/dev/dri
+    
+    # Uncomment for NVIDIA NVENC hardware encoding
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     
     volumes:
       # Mount your video directories

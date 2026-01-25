@@ -1,10 +1,10 @@
 # H265 Transcoder
 
-A professional video transcoding solution with both a desktop GUI application and a headless CLI service. Built with Electron, React, and GStreamer, this tool efficiently splits large video files into configurable time-based segments and transcodes them to H.265 format.
+A video transcoding solution with both a desktop GUI application and a headless CLI service. Built with Electron, React, and GStreamer, this tool efficiently splits large video files into configurable time-based segments and transcodes them to H.265 format.
 
 ## Overview
 
-**H265 Transcoder** is designed for processing large video files, particularly those from underwater cameras or other recording devices. It offers two modes of operation:
+**H265 Transcoder** is designed for processing large video files, particularly those from underwater cameras or other long-session recording devices. It offers two modes of operation:
 
 - **GUI Application** - Desktop app for manual batch processing with visual progress tracking
 - **CLI Service** - Headless service for automated directory monitoring and processing
@@ -37,9 +37,9 @@ Download the latest installer from [Releases](https://github.com/oceanlabsystems
 
 | Platform | Download                          | Notes |
 | -------- | --------------------------------- | ----- |
-| Windows  | `h265-transcoder-X.X.X-setup.exe` | GStreamer bundled, ready to use |
-| macOS    | `h265-transcoder-X.X.X.dmg`       | GStreamer bundled, ready to use |
-| Linux    | `h265-transcoder-X.X.X.deb`       | **Recommended** — GStreamer bundled |
+| Windows  | `h265-transcoder-X.X.X-setup.exe` | GStreamer bundled |
+| macOS    | `h265-transcoder-X.X.X.dmg`       | GStreamer bundled |
+| Linux    | `h265-transcoder-X.X.X.deb`       | GStreamer bundled |
 | Linux    | `h265-transcoder-X.X.X.AppImage`  | GStreamer bundled |
 
 The installer includes both the GUI application and CLI service tools.
@@ -60,7 +60,7 @@ If `vainfo` shows your GPU and supported profiles, hardware encoding will work a
 
 ### Docker (Headless Linux Servers)
 
-#### Software Encoding (Works Everywhere)
+#### Software Encoding (Works Everywhere - though very slow)
 
 ```bash
 # Create directories
@@ -90,7 +90,7 @@ docker run -d \
 
 #### Hardware Encoding (Intel VA-API)
 
-For Intel hardware encoding in Docker, you need to pass through the GPU:
+For hardware encoding in Docker, you need to pass through the GPU:
 
 ```bash
 # Verify host has VA-API working first
@@ -111,7 +111,36 @@ Update your `config.yaml` to use hardware encoding:
 
 ```yaml
 encoder: vaapih265  # Intel VA-API hardware encoder
+
 ```
+
+#### Hardware Encoding (NVIDIA NVENC)
+
+For NVIDIA GPU hardware encoding in Docker, you need to pass through the GPU using the NVIDIA Container Toolkit:
+
+```bash
+# Verify NVIDIA drivers and Container Toolkit are installed
+nvidia-smi
+
+# Run with GPU passthrough
+docker run -d \
+  --name h265-transcoder \
+  --restart unless-stopped \
+  --gpus all \
+  -v $(pwd)/input:/input:ro \
+  -v $(pwd)/output:/output \
+  -v $(pwd)/config:/config \
+  oceanlabsystems/h265-transcoder:latest
+```
+
+Update your `config.yaml` to use NVIDIA hardware encoding:
+
+```yaml
+encoder: nvh265  # NVIDIA NVENC hardware encoder
+
+```
+
+**Note:** The NVIDIA Container Toolkit must be installed on your host system. See [NVIDIA Container Toolkit documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for installation instructions.
 
 #### Docker Compose
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a portable-ish Linux GStreamer bundle using an Ubuntu 20.04 baseline.
+# Build a portable Linux GStreamer bundle using Ubuntu 22.04 as baseline.
 #
 # Output layout (consumed by runtime resolver):
 #   gstreamer/linux/
@@ -7,10 +7,13 @@
 #     lib/        (libgstreamer-1.0.so*, libgst*.so*, and plugins under lib/gstreamer-1.0/)
 #     libexec/    (gst-plugin-scanner when available)
 #
+# Target: Ubuntu 22.04+ (GStreamer 1.20.x)
+# Hardware encoding: Intel VA-API (vaapih265enc) is the priority for Linux.
+#
 # Notes:
-# - We intentionally DO NOT bundle glibc. Building on Ubuntu 20.04 ensures GLIBC compatibility
-#   with newer distros (glibc is backward compatible, not forward compatible).
-# - This bundle is best-effort; Linux distros vary. Keep system fallback enabled at runtime.
+# - We DO NOT bundle system/driver libs (glibc, libva, libdrm, etc.) - these must come
+#   from the target system to work with GPU drivers.
+# - GStreamer 1.20 from Ubuntu 22.04 is compatible with 22.04+ systems.
 
 set -euo pipefail
 
@@ -29,7 +32,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "========================================"
-echo "Building Linux GStreamer bundle (Ubuntu 20.04)"
+echo "Building Linux GStreamer bundle (Ubuntu 22.04 / GStreamer 1.20)"
 echo "Output: $OUT_ROOT"
 echo "========================================"
 
@@ -49,7 +52,7 @@ rm -rf "$OUT_ROOT" 2>/dev/null || {
 }
 mkdir -p "$OUT_ROOT"
 
-# Build inside Ubuntu 20.04 to lock glibc baseline (2.31)
+# Build inside Ubuntu 22.04 for GStreamer 1.20.x (compatible with modern systems)
 # Run as root to install packages, then fix permissions afterward
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
@@ -58,13 +61,13 @@ docker run --rm -i \
   -e HOST_UID="$HOST_UID" \
   -e HOST_GID="$HOST_GID" \
   -v "$PROJECT_DIR:/work" \
-  ubuntu:20.04 \
+  ubuntu:22.04 \
   bash <<'DOCKER_SCRIPT'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 # Install packages as root
-# Include VA-API plugins for hardware encoding (msdkh265enc, vaapih265enc)
+# Priority: Intel VA-API hardware encoding (vaapih265enc)
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -74,7 +77,9 @@ apt-get install -y --no-install-recommends \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
   gstreamer1.0-libav \
-  gstreamer1.0-vaapi
+  gstreamer1.0-vaapi \
+  intel-media-va-driver \
+  libmfx1
 
 mkdir -p /work/gstreamer/linux/bin /work/gstreamer/linux/lib /work/gstreamer/linux/libexec
 
@@ -100,8 +105,8 @@ if [ -d /usr/lib/x86_64-linux-gnu/gstreamer-1.0 ]; then
   fi
 fi
 
-# Core libs (best-effort: copy GStreamer-related libs; do NOT copy libc)
-# Include VA-API libraries for hardware encoding support
+# Core libs (best-effort: copy GStreamer-related libs)
+# NOTE: Do NOT bundle VA-API/DRM libs - they must come from system to work with GPU drivers
 if [ -d /usr/lib/x86_64-linux-gnu ]; then
   find /usr/lib/x86_64-linux-gnu -maxdepth 1 -type f \( \
     -name 'libgstreamer-*.so*' -o \
@@ -113,9 +118,7 @@ if [ -d /usr/lib/x86_64-linux-gnu ]; then
     -name 'libgmodule-2.0.so*' -o \
     -name 'libgio-2.0.so*' -o \
     -name 'libgthread-2.0.so*' -o \
-    -name 'libgirepository-1.0.so*' -o \
-    -name 'libva*.so*' -o \
-    -name 'libdrm.so*' \
+    -name 'libgirepository-1.0.so*' \
   \) -print0 | xargs -0 -I{} cp -a {} /work/gstreamer/linux/lib/ || true
 fi
 
@@ -139,16 +142,41 @@ BINDIR="$BUNDLE_ROOT/bin"
 
 mkdir -p "$LIBDIR"
 
-# Libraries we should NOT bundle (glibc + loader + kernel/vdso)
+# Libraries we should NOT bundle:
+# - glibc and core system libs (must match system)
+# - C++ stdlib and GCC runtime (must match system compiler)
+# - Graphics/driver libs (must match system GPU drivers)
+# - VA-API/DRM libs (must match system hardware drivers for HW encoding)
 should_skip_lib() {
   case "$1" in
+    # Core system libs
     *linux-vdso.so.*) return 0 ;;
     */ld-linux-*.so.*) return 0 ;;
-    */libc.so.6) return 0 ;;
+    */libc.so.*) return 0 ;;
     */libm.so.*) return 0 ;;
     */libpthread.so.*) return 0 ;;
     */librt.so.*) return 0 ;;
     */libdl.so.*) return 0 ;;
+    */libresolv.so.*) return 0 ;;
+    */libnss*.so.*) return 0 ;;
+    # C++ and GCC runtime (must match system)
+    */libstdc++.so.*) return 0 ;;
+    */libgcc_s.so.*) return 0 ;;
+    # Graphics/GPU driver libs (must match system)
+    */libdrm*.so.*) return 0 ;;
+    */libva*.so.*) return 0 ;;
+    */libGL*.so.*) return 0 ;;
+    */libEGL*.so.*) return 0 ;;
+    */libgbm.so.*) return 0 ;;
+    */libwayland*.so.*) return 0 ;;
+    */libX11*.so.*) return 0 ;;
+    */libxcb*.so.*) return 0 ;;
+    # SELinux/security
+    */libselinux.so.*) return 0 ;;
+    */libsepol.so.*) return 0 ;;
+    # System services
+    */libsystemd.so.*) return 0 ;;
+    */libdbus*.so.*) return 0 ;;
   esac
   return 1
 }

@@ -19,6 +19,16 @@ A professional video transcoding solution with both a desktop GUI application an
 - ⚡ Real-time progress tracking with ETA calculations
 - 🔄 Auto-restart on failure when running as a service
 
+## Supported Platforms
+
+| Platform | Versions | Hardware Encoding |
+| -------- | -------- | ----------------- |
+| **Windows** | Windows 10/11 | NVIDIA NVENC, Intel Quick Sync |
+| **macOS** | macOS 11+ (Big Sur) | Apple VideoToolbox |
+| **Linux** | Ubuntu 22.04+, Debian 12+ | Intel VA-API, NVIDIA NVENC |
+
+> **Note:** Older Linux distributions (e.g. 20.04) are not supported due to GStreamer version requirements.
+
 ## Installation
 
 ### Desktop Application (Windows/macOS/Linux)
@@ -27,23 +37,30 @@ Download the latest installer from [Releases](https://github.com/oceanlabsystems
 
 | Platform | Download                          | Notes |
 | -------- | --------------------------------- | ----- |
-| Windows  | `h265-transcoder-X.X.X-setup.exe` | GStreamer bundled |
-| macOS    | `h265-transcoder-X.X.X.dmg`       | GStreamer bundled |
-| Linux    | `h265-transcoder-X.X.X.deb`       | **Recommended** — GStreamer installed automatically via apt |
-| Linux    | `h265-transcoder-X.X.X.AppImage`  | Requires manual GStreamer install (see below) |
+| Windows  | `h265-transcoder-X.X.X-setup.exe` | GStreamer bundled, ready to use |
+| macOS    | `h265-transcoder-X.X.X.dmg`       | GStreamer bundled, ready to use |
+| Linux    | `h265-transcoder-X.X.X.deb`       | **Recommended** — GStreamer bundled |
+| Linux    | `h265-transcoder-X.X.X.AppImage`  | GStreamer bundled |
 
 The installer includes both the GUI application and CLI service tools.
 
-> **Linux .deb users:** GStreamer is automatically installed when you install the `.deb` package.
->
-> **Linux AppImage users:** Install GStreamer first:
-> ```bash
-> sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
-> ```
+### Linux Requirements
+
+The Linux builds bundle GStreamer, but **hardware encoding requires system drivers**:
+
+```bash
+# Ubuntu 22.04+ / Debian 12+ — Install Intel VA-API drivers for hardware encoding
+sudo apt install intel-media-va-driver vainfo
+
+# Verify VA-API is working
+vainfo
+```
+
+If `vainfo` shows your GPU and supported profiles, hardware encoding will work automatically.
 
 ### Docker (Headless Linux Servers)
 
-The recommended way to run on headless servers:
+#### Software Encoding (Works Everywhere)
 
 ```bash
 # Create directories
@@ -71,7 +88,32 @@ docker run -d \
   oceanlabsystems/h265-transcoder:latest
 ```
 
-Or use Docker Compose:
+#### Hardware Encoding (Intel VA-API)
+
+For Intel hardware encoding in Docker, you need to pass through the GPU:
+
+```bash
+# Verify host has VA-API working first
+vainfo
+
+# Run with GPU passthrough
+docker run -d \
+  --name h265-transcoder \
+  --restart unless-stopped \
+  --device /dev/dri:/dev/dri \
+  -v $(pwd)/input:/input:ro \
+  -v $(pwd)/output:/output \
+  -v $(pwd)/config:/config \
+  oceanlabsystems/h265-transcoder:latest
+```
+
+Update your `config.yaml` to use hardware encoding:
+
+```yaml
+encoder: vaapih265  # Intel VA-API hardware encoder
+```
+
+#### Docker Compose
 
 ```bash
 curl -O https://raw.githubusercontent.com/oceanlabsystems/h265-transcoder/main/docker-compose.yml
@@ -175,13 +217,17 @@ Stop-Service H265TranscoderService
 
 ## Encoders
 
-| Encoder     | Type             | Speed     | Compatibility |
-| ----------- | ---------------- | --------- | ------------- |
-| **x265**    | Software (CPU)   | 0.1-0.3x  | All systems   |
-| **nvh265**  | NVIDIA NVENC     | 0.5-1.0x  | NVIDIA GPUs   |
-| **qsvh265** | Intel Quick Sync | 0.25-0.4x | Intel GPUs    |
+| Encoder       | Type             | Speed     | Platform | Requirements |
+| ------------- | ---------------- | --------- | -------- | ------------ |
+| **x265**      | Software (CPU)   | 0.1-0.3x  | All      | None (always available) |
+| **nvh265**    | NVIDIA NVENC     | 0.5-1.0x  | All      | NVIDIA GPU + drivers |
+| **qsvh265**   | Intel Quick Sync | 0.25-0.4x | Win/Mac  | Intel GPU + drivers |
+| **vaapih265** | Intel VA-API     | 0.3-0.5x  | Linux    | Intel GPU + `intel-media-va-driver` |
+| **vtenc**     | VideoToolbox     | 0.4-0.6x  | macOS    | Apple Silicon or Intel Mac |
 
 Speed is relative to video duration (1.0x = realtime).
+
+The application automatically detects available hardware encoders and recommends the best option.
 
 ## Output Files
 
@@ -291,44 +337,124 @@ h265-transcoder/
 
 ## Troubleshooting
 
-### GStreamer Not Found
+### Linux: Hardware Encoder Not Detected
+
+If the app only shows "x265 (software)" on Linux, your VA-API drivers may be missing or misconfigured.
+
+#### 1. Check VA-API Status
 
 ```bash
-# Linux: Install system GStreamer (recommended)
-sudo apt install gstreamer1.0-tools \
-  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-  gstreamer1.0-libav
+# Install vainfo tool
+sudo apt install vainfo
 
-# Or run the helper (Linux only). Set AUTO_INSTALL_GSTREAMER=1 to auto-install via apt.
-npm run check:gstreamer:linux
-
-# Windows: Run download script
-npm run download-gstreamer
+# Check if VA-API is working
+vainfo
 ```
 
-**Note (Linux installers / first-run):**
-- You can call `npm run check:gstreamer:linux` during install or first launch to validate deps.
-- To auto-install on Debian/Ubuntu when missing, run with `AUTO_INSTALL_GSTREAMER=1`.
+**Expected output** (Intel GPU):
+```
+vainfo: VA-API version: 1.22 (libva 2.12.0)
+vainfo: Driver version: Intel iHD driver for Intel(R) Gen Graphics
+vainfo: Supported profile and entrypoints
+      VAProfileHEVCMain               : VAEntrypointEncSlice
+      ...
+```
 
-### Encoder Not Available
+#### 2. Install Intel VA-API Drivers
 
-- **nvh265**: Install NVIDIA GPU drivers
-- **qsvh265**: Install Intel GPU drivers
+```bash
+# Ubuntu 22.04+ / Debian 12+
+sudo apt install intel-media-va-driver
+
+# For older Intel GPUs (Broadwell and earlier)
+sudo apt install i965-va-driver
+
+# Verify installation
+vainfo
+```
+
+#### 3. Common VA-API Errors
+
+| Error | Solution |
+| ----- | -------- |
+| `vaInitialize failed` | Install `intel-media-va-driver` or `i965-va-driver` |
+| `LIBVA_DRIVER_NAME` issues | Set `export LIBVA_DRIVER_NAME=iHD` (or `i965` for older GPUs) |
+| Permission denied on `/dev/dri` | Add user to `video` and `render` groups: `sudo usermod -aG video,render $USER` |
+
+#### 4. Clear GStreamer Cache
+
+After installing drivers, clear the plugin cache:
+
+```bash
+rm -f ~/.cache/gstreamer-1.0/registry.bin
+```
+
+Then restart the application.
+
+### Linux: Unsupported Distribution
+
+The Linux builds require **Ubuntu 22.04+** or **Debian 12+**. Older distributions have incompatible GStreamer versions.
+
+If you're on an older system, use Docker instead:
+
+```bash
+docker run -d --device /dev/dri:/dev/dri \
+  -v /path/to/input:/input:ro \
+  -v /path/to/output:/output \
+  oceanlabsystems/h265-transcoder:latest
+```
+
+### Windows/macOS: Encoder Not Available
+
+- **nvh265**: Install [NVIDIA GPU drivers](https://www.nvidia.com/drivers)
+- **qsvh265**: Install [Intel Graphics drivers](https://www.intel.com/content/www/us/en/download-center/home.html)
 - **Fallback**: Use `x265` (works on all systems)
+
+### Docker: Hardware Encoding Not Working
+
+```bash
+# 1. Verify host has working VA-API
+vainfo
+
+# 2. Check /dev/dri exists and is accessible
+ls -la /dev/dri/
+
+# 3. Run container with GPU passthrough
+docker run --device /dev/dri:/dev/dri ...
+
+# 4. Inside container, verify VA-API works
+docker exec -it h265-transcoder vainfo
+```
 
 ### Docker: Permission Denied
 
 ```bash
 # Ensure output directory is writable
 chmod 777 ./output
+
 # Or run with specific user
 docker run --user $(id -u):$(id -g) ...
+
+# For GPU access, add user to video group
+sudo usermod -aG video $USER
 ```
 
 ### Progress Stuck at 0%
 
 MP4/MOV formats buffer until chunk completion. Use MKV format for incremental progress visibility.
+
+### GStreamer Not Found (Development)
+
+```bash
+# Linux: Install system GStreamer
+sudo apt install gstreamer1.0-tools \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav gstreamer1.0-vaapi
+
+# Windows: Run download script
+npm run download-gstreamer
+```
 
 ## CI/CD
 

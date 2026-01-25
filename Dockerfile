@@ -1,5 +1,9 @@
 # H265 Transcoder CLI - Docker Image
 # Lightweight image for headless video transcoding
+#
+# Hardware Encoding (Intel VA-API):
+#   Run with GPU passthrough: docker run --device /dev/dri:/dev/dri ...
+#   Set encoder in config.yaml: encoder: vaapih265
 
 FROM node:20-slim
 
@@ -7,6 +11,7 @@ LABEL maintainer="Oceanlab Systems <support@oceanlabsystems.com>"
 LABEL description="H265 Video Transcoder - Automated batch transcoding service"
 
 # Install GStreamer and VA-API support for hardware encoding
+# Note: Intel VA-API requires --device /dev/dri passthrough at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
@@ -15,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
     gstreamer1.0-vaapi \
+    intel-media-va-driver \
+    vainfo \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

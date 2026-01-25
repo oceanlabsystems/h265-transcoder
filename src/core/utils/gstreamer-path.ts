@@ -231,7 +231,10 @@ export function getGStreamerPathWithContext(context: RuntimeContext): GStreamerP
       const tempDir = process.env.TEMP || process.env.TMP || os.tmpdir();
       envVars.GST_REGISTRY_1_0 = path.join(tempDir, 'gstreamer-1.0', 'registry.bin');
     } else if (platform === 'linux') {
-      // Linux-specific: add library path
+      // Linux-specific: prepend bundled library path
+      // Note: The bundle intentionally does NOT include system/driver libs (libva, libdrm, 
+      // libstdc++, etc.) which must come from the target system for hardware encoding to work.
+      // Only GStreamer core libraries are bundled.
       envVars.LD_LIBRARY_PATH = `${libPath}${path.delimiter}${process.env.LD_LIBRARY_PATH || ''}`;
       
       // Plugin scanner for Linux

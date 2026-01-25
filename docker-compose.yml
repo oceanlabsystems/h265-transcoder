@@ -1,5 +1,10 @@
 # H265 Transcoder Docker Compose
 # Quick start: docker-compose up -d
+#
+# Hardware Encoding (Intel VA-API):
+#   1. Uncomment the 'devices' section below
+#   2. Set encoder: vaapih265 in config/config.yaml
+#   3. Verify with: docker exec h265-transcoder vainfo
 
 version: '3.8'
 
@@ -10,6 +15,11 @@ services:
     # image: oceanlabsystems/h265-transcoder:latest
     container_name: h265-transcoder
     restart: unless-stopped
+    
+    # Uncomment for Intel VA-API hardware encoding
+    # devices:
+    #   - /dev/dri:/dev/dri
+    
     volumes:
       # Mount your video directories
       - ./input:/input:ro          # Source videos (read-only)

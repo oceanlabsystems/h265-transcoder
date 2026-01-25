@@ -69,7 +69,20 @@ jobs:
           }
 
           Write-Host "Installing GStreamer via Chocolatey..."
-          choco install gstreamer gstreamer-devel -y --no-progress
+          $chocoSuccess = $false
+          try {
+            choco install gstreamer gstreamer-devel -y --no-progress 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              $chocoSuccess = $true
+              Write-Host "Chocolatey installation succeeded"
+            } else {
+              Write-Warning "Chocolatey installation failed (exit code: $LASTEXITCODE)"
+              Write-Warning "This may be due to Chocolatey service issues. Checking for existing GStreamer installation..."
+            }
+          } catch {
+            Write-Warning "Chocolatey installation error: $_"
+            Write-Warning "Checking for existing GStreamer installation..."
+          }
 
           $gstRoot = $null
           $possibleRoots = @(
@@ -89,6 +102,7 @@ jobs:
           }
 
           if (-not $gstRoot) {
+            Write-Host "Searching system-wide for GStreamer..."
             $gstExe = Get-ChildItem -Path "C:\" -Recurse -Filter "gst-launch-1.0.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($gstExe) {
               $gstRoot = Split-Path (Split-Path $gstExe.FullName)
@@ -97,7 +111,7 @@ jobs:
           }
 
           if (-not $gstRoot) {
-            Write-Error "GStreamer installation not found!"
+            Write-Error "GStreamer installation not found! Chocolatey installation may have failed. Please install GStreamer manually or retry the build."
             exit 1
           }
 

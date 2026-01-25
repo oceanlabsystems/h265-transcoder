@@ -55,6 +55,8 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
 docker run --rm \
+  -e HOST_UID="$HOST_UID" \
+  -e HOST_GID="$HOST_GID" \
   -v "$PROJECT_DIR:/work" \
   ubuntu:20.04 \
   bash -c "
@@ -213,7 +215,7 @@ docker run --rm \
     /work/gstreamer/linux/bin/gst-inspect-1.0 --version || true
     
     # Fix ownership of output files to match host user
-    chown -R $HOST_UID:$HOST_GID /work/gstreamer/linux || true
+    chown -R \"\$HOST_UID:\$HOST_GID\" /work/gstreamer/linux || true
   "
 
 echo ""

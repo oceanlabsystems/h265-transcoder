@@ -83,6 +83,19 @@ docker run --rm \
     if [ -d /usr/lib/x86_64-linux-gnu/gstreamer-1.0 ]; then
       mkdir -p /work/gstreamer/linux/lib/gstreamer-1.0
       cp -a /usr/lib/x86_64-linux-gnu/gstreamer-1.0/* /work/gstreamer/linux/lib/gstreamer-1.0/
+      
+      # Verify critical plugins are included
+      echo "Verifying critical plugins are bundled..."
+      if [ -f /work/gstreamer/linux/lib/gstreamer-1.0/libgstvaapi.so ]; then
+        echo "  ✓ libgstvaapi.so found"
+      else
+        echo "  ✗ WARNING: libgstvaapi.so not found in bundle!"
+      fi
+      if [ -f /work/gstreamer/linux/lib/gstreamer-1.0/libgstmsdk.so ]; then
+        echo "  ✓ libgstmsdk.so found"
+      else
+        echo "  ✗ WARNING: libgstmsdk.so not found in bundle!"
+      fi
     fi
 
     # Core libs (best-effort: copy GStreamer-related libs; do NOT copy libc)

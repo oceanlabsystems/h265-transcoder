@@ -167,7 +167,7 @@ const ALL_ENCODERS: Omit<EncoderInfo, "available" | "recommended">[] = [
 async function ensureRegistryInitialized(
   context: RuntimeContext
 ): Promise<boolean> {
-  const { env: gstEnv, binPath } = getGStreamerPathWithContext(context);
+  const { env: gstEnv, binPath, pluginPath } = getGStreamerPathWithContext(context);
   const processEnv = { ...process.env, ...gstEnv };
 
   // Ensure registry directory exists
@@ -191,16 +191,48 @@ async function ensureRegistryInitialized(
   }
 
   // Check if registry already exists and is recent (less than 24 hours old)
+  // Also check if the bundle has changed (by checking plugin directory mtime)
   if (registryPath && fs.existsSync(registryPath)) {
     try {
       const stats = fs.statSync(registryPath);
       const ageHours = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
-      if (ageHours < 24) {
+      
+      // Check if bundle plugins are newer than registry (bundle was updated)
+      let bundleNewer = false;
+      if (pluginPath && fs.existsSync(pluginPath)) {
+        try {
+          const pluginStats = fs.statSync(pluginPath);
+          if (pluginStats.mtimeMs > stats.mtimeMs) {
+            bundleNewer = true;
+            debugLogger.logInit(
+              `[Encoder Detection] Bundle plugins are newer than registry cache, invalidating cache`,
+              context
+            );
+          }
+        } catch {
+          // Ignore stat errors
+        }
+      }
+      
+      if (ageHours < 24 && !bundleNewer) {
         debugLogger.logInit(
           `[Encoder Detection] Registry cache exists and is recent (${ageHours.toFixed(1)}h old)`,
           context
         );
         return true;
+      }
+      
+      // Registry is stale or bundle changed - delete it to force rebuild
+      if (bundleNewer || ageHours >= 24) {
+        try {
+          fs.unlinkSync(registryPath);
+          debugLogger.logInit(
+            `[Encoder Detection] Invalidated stale registry cache (${bundleNewer ? 'bundle updated' : `${ageHours.toFixed(1)}h old`})`,
+            context
+          );
+        } catch {
+          // Ignore deletion errors
+        }
       }
     } catch {
       // Ignore stat errors
